@@ -1,4 +1,4 @@
-import os, uuid, shutil, hashlib, logging
+import os, uuid, shutil, hashlib, logging, secrets, csv, io, zipfile, json, hmac, base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -7,9 +7,10 @@ import bcrypt
 import redis
 from app.security_crypto import encrypt_bytes, decrypt_bytes
 from jose import jwt, JWTError
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import MongoClient
 from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select
@@ -35,7 +36,7 @@ MAX_UPLOAD_BYTES=int(os.getenv('MAX_UPLOAD_MB','10'))*1024*1024
 _proj_storage = Path(__file__).resolve().parent.parent.parent / 'storage'
 STORAGE = Path('/app/storage') if Path('/app').exists() else (_proj_storage if _proj_storage.parent.exists() else Path('storage'))
 STORAGE.mkdir(parents=True, exist_ok=True)
-ALLOWED={'.pdf','.docx','.xlsx','.csv','.txt','.png','.jpg','.jpeg','.webp'}
+ALLOWED={'.pdf','.docx','.xlsx','.pptx','.csv','.txt','.png','.jpg','.jpeg','.webp'}
 
 def init_database(url: str):
     target_url = url
@@ -93,6 +94,45 @@ class FileShare(Base):
     token_hash: Mapped[str]=mapped_column(String(64),unique=True,index=True)
     expires_at: Mapped[datetime]=mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool]=mapped_column(Boolean,default=False)
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+class SharePolicy(Base):
+    __tablename__='share_policies'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    share_id: Mapped[int]=mapped_column(ForeignKey('file_shares.id'),unique=True,index=True)
+    max_downloads: Mapped[Optional[int]]=mapped_column(Integer,nullable=True)
+    download_count: Mapped[int]=mapped_column(Integer,default=0)
+    permission: Mapped[str]=mapped_column(String(20),default='download')
+
+class FileGrant(Base):
+    __tablename__='file_grants'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    file_id: Mapped[int]=mapped_column(ForeignKey('files.id'),index=True)
+    owner_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
+    recipient_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
+    permission: Mapped[str]=mapped_column(String(20),default='view_download')
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+class Vault(Base):
+    __tablename__='vaults'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    user_id: Mapped[int]=mapped_column(ForeignKey('users.id'),unique=True,index=True)
+    salt: Mapped[str]=mapped_column(String(64))
+    verifier: Mapped[str]=mapped_column(String(64))
+    failed_attempts: Mapped[int]=mapped_column(Integer,default=0)
+    locked_until: Mapped[Optional[datetime]]=mapped_column(DateTime(timezone=True),nullable=True)
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+class VaultFile(Base):
+    __tablename__='vault_files'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    user_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
+    stored_name: Mapped[str]=mapped_column(String(255),unique=True)
+    sealed_name: Mapped[str]=mapped_column(Text)
+    nonce: Mapped[str]=mapped_column(String(32))
+    content_type: Mapped[str]=mapped_column(String(150))
+    size: Mapped[int]=mapped_column(Integer)
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 
 class FileKey(Base):
     __tablename__='file_keys'
@@ -130,6 +170,21 @@ mdb = mongo_client[MONGO_DB] if mongo_available else None
 cache = init_redis(REDIS_URL)
 
 app=FastAPI(title='TrustShare API',version='1.0.0',description='TrustShare Milestone 1 file management API')
+@app.middleware('http')
+async def security_observability(request:Request,call_next):
+    request_id=request.headers.get('x-request-id') or uuid.uuid4().hex
+    response=await call_next(request)
+    response.headers['X-Request-ID']=request_id
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['X-Frame-Options']='DENY'
+    response.headers['Referrer-Policy']='no-referrer'
+    response.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+    if response.status_code in (401,403,429):
+        path=request.url.path
+        if path.startswith('/share/'): path='/share/[REDACTED]'
+        log_event('request_blocked',None,{'path':path,'method':request.method,'status':response.status_code,'ip':request.client.host if request.client else None,'user_agent':request.headers.get('user-agent','')[:300],'request_id':request_id})
+    return response
+
 frontend_origin=os.getenv('FRONTEND_ORIGIN','http://localhost:5173')
 origins = list({frontend_origin, 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'})
 app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
@@ -201,6 +256,41 @@ def require_roles(*roles):
 
 def user_dict(u): return {'id':u.id,'name':u.name,'email':u.email,'role':u.role,'created_at':u.created_at.isoformat() if u.created_at else None}
 def file_dict(f): return {'id':f.id,'name':f.original_name,'content_type':f.content_type,'size':f.size,'sha256':f.sha256,'owner_id':f.owner_id,'folder_id':f.folder_id,'uploaded_at':f.uploaded_at.isoformat() if f.uploaded_at else None}
+def validate_file_content(filename: str, content: bytes):
+    suffix=Path(filename).suffix.lower()
+    signatures={
+        '.pdf':content.startswith(b'%PDF-'),
+        '.png':content.startswith(bytes([137,80,78,71,13,10,26,10])),
+        '.jpg':content.startswith(bytes([255,216,255])),
+        '.jpeg':content.startswith(bytes([255,216,255])),
+        '.webp':len(content)>=12 and content[:4]==b'RIFF' and content[8:12]==b'WEBP',
+    }
+    if suffix in signatures and not signatures[suffix]: raise HTTPException(415,'File content does not match its extension')
+    if suffix in {'.docx','.xlsx','.pptx'}:
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                names=set(archive.namelist())
+                needed={'.docx':'word/document.xml','.xlsx':'xl/workbook.xml','.pptx':'ppt/presentation.xml'}[suffix]
+                if '[Content_Types].xml' not in names or needed not in names: raise HTTPException(415,'Office document structure is invalid')
+                if len(names)>5000 or sum(max(0,item.file_size) for item in archive.infolist())>100*1024*1024: raise HTTPException(413,'Office document expands beyond safe inspection limits')
+        except zipfile.BadZipFile: raise HTTPException(415,'Office document is not a valid Office container')
+    if suffix in {'.txt','.csv'}:
+        if 0 in content[:8192]: raise HTTPException(415,'Text file contains binary content')
+        try: content.decode('utf-8-sig')
+        except UnicodeDecodeError: raise HTTPException(415,'Text files must use UTF-8 encoding')
+
+def audit_events_for(user:User, days:int=30, admin:bool=False):
+    if not mongo_available or mdb is None: return []
+    cutoff=datetime.now(timezone.utc)-timedelta(days=days)
+    query={'timestamp':{'$gte':cutoff}}
+    if not admin: query['user_id']=user.id
+    try:
+        rows=mdb.activity.find(query,{'_id':0}).sort('timestamp',-1).limit(5000)
+        return [{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in row.items()} for row in rows]
+    except Exception as exc:
+        logger.warning(f'Activity query failed: {exc}')
+        return []
+
 
 @app.get('/health')
 def health():
@@ -209,7 +299,8 @@ def health():
         'database':db_backend,
         'postgres':'connected' if db_backend=='postgres' else 'fallback_sqlite',
         'mongodb':'connected' if mongo_available else 'unavailable',
-        'redis':'connected' if cache else 'unavailable'
+        'redis':'connected' if cache else 'unavailable',
+        'storage':'writable' if STORAGE.exists() and os.access(STORAGE,os.W_OK) else 'unavailable'
     }
 
 @app.post('/api/auth/register',status_code=201)
@@ -311,7 +402,13 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
             if size>MAX_UPLOAD_BYTES: raise HTTPException(413,f'File exceeds {MAX_UPLOAD_BYTES//1024//1024} MiB limit')
             digest.update(chunk); chunks.append(chunk)
         if size==0: raise HTTPException(400,'Empty files are not allowed')
-        encrypted,wrapped_key,wrap_nonce,key_version=encrypt_bytes(b''.join(chunks),stored)
+        plaintext=b''.join(chunks)
+        validate_file_content(original,plaintext)
+        if db.scalar(select(StoredFile.id).where(StoredFile.owner_id==user.id,StoredFile.sha256==digest.hexdigest())): raise HTTPException(409,'You already uploaded an identical file')
+        quota_bytes=int(os.getenv('USER_STORAGE_QUOTA_MB','100'))*1024*1024
+        current_bytes=db.scalar(select(func.coalesce(func.sum(StoredFile.size),0)).where(StoredFile.owner_id==user.id)) or 0
+        if current_bytes+size>quota_bytes: raise HTTPException(413,'Your storage quota would be exceeded')
+        encrypted,wrapped_key,wrap_nonce,key_version=encrypt_bytes(plaintext,stored)
         with dest.open('wb') as out: out.write(encrypted)
         record=StoredFile(original_name=original,stored_name=stored,content_type=file.content_type or 'application/octet-stream',size=size,sha256=digest.hexdigest(),owner_id=user.id,folder_id=folder_id)
         db.add(record); db.flush()

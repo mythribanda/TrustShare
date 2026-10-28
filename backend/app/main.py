@@ -14,7 +14,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import MongoClient
-from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select, update, delete
+from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select, update, delete, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 logger = logging.getLogger("trustshare")
@@ -168,6 +168,30 @@ class FileKey(Base):
     created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 
 Base.metadata.create_all(bind=engine)
+
+def migrate_legacy_file_schema():
+    """Add columns missing from older SQLite databases without deleting user data."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    if "files" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("files")}
+    if "stored_name" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE files ADD COLUMN stored_name VARCHAR(255)"))
+            # Preserve existing rows. Legacy object names may need manual reconciliation
+            # if the older version stored files under a different naming convention.
+            connection.execute(text(
+                "UPDATE files SET stored_name = 'legacy-' || id || '-' || original_name "
+                "WHERE stored_name IS NULL OR stored_name = ''"
+            ))
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_files_stored_name_migration "
+                "ON files (stored_name)"
+            ))
+
+migrate_legacy_file_schema()
 def init_redis(url: str):
     for u in list(dict.fromkeys([url, url.replace('://redis:', '://localhost:'), 'redis://localhost:6379/0'])):
         try:

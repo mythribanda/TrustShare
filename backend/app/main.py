@@ -363,14 +363,18 @@ def list_files(q:Optional[str]=None,folder_id:Optional[int]=None,user:User=Depen
     stmt=select(StoredFile).where(StoredFile.owner_id==user.id)
     if folder_id is not None: stmt=stmt.where(StoredFile.folder_id==folder_id)
     if q: stmt=stmt.where(StoredFile.original_name.ilike(f'%{q[:100]}%'))
-    return [file_dict(f) for f in db.scalars(stmt.order_by(StoredFile.uploaded_at.desc())).all()]
+    owned=db.scalars(stmt.order_by(StoredFile.uploaded_at.desc())).all()
+    shared_ids=[grant.file_id for grant in db.scalars(select(FileGrant).where(FileGrant.recipient_id==user.id)).all()]
+    shared=db.scalars(select(StoredFile).where(StoredFile.id.in_(shared_ids))).all() if shared_ids and folder_id is None else []
+    combined={item.id:item for item in [*owned,*shared] if not q or q[:100].lower() in item.original_name.lower()}
+    return [file_dict(item) for item in sorted(combined.values(),key=lambda item:item.uploaded_at or datetime.min,reverse=True)]
 
 @app.get('/api/files/{file_id}/metadata')
 def get_file_metadata(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
     record=db.scalar(select(StoredFile).where(StoredFile.id==file_id))
     if not record: raise HTTPException(404,'File not found')
-    if record.owner_id!=user.id and user.role!='admin':
-        raise HTTPException(403,'Insufficient permissions to view file metadata')
+    if record.owner_id!=user.id and user.role!='admin' and not db.scalar(select(FileGrant.id).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id)):
+        raise HTTPException(404,'File not found')
     doc=None
     if mongo_available and mdb is not None:
         try:
@@ -428,9 +432,11 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
     finally: file.file.close()
 
 @app.get('/api/files/{file_id}/download')
-def download_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    record=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
-    if not record: raise HTTPException(404,'File not found')
+def download_file(file_id:int,request:Request,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    record=db.scalar(select(StoredFile).where(StoredFile.id==file_id))
+    grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id))
+    if not record or (record.owner_id!=user.id and grant is None): raise HTTPException(404,'File not found')
+    if grant and grant.permission=='view': raise HTTPException(403,'Download is disabled for this shared file')
     path=STORAGE/record.stored_name
     if not path.is_file(): raise HTTPException(404,'Stored file is missing')
     key_record=db.scalar(select(FileKey).where(FileKey.file_id==record.id))
@@ -442,7 +448,7 @@ def download_file(file_id:int,user:User=Depends(current_user),db:Session=Depends
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id})
         raise HTTPException(500,'Could not decrypt stored file')
-    log_event('file_downloaded',user.id,{'file_id':file_id})
+    log_event('file_downloaded',user.id,{'file_id':file_id,'ip':request.client.host if request.client else None})
     return Response(content=plaintext,media_type=record.content_type,headers={'Content-Disposition':f'attachment; filename="{record.original_name}"'})
 
 @app.delete('/api/files/{file_id}')

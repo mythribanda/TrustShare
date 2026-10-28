@@ -730,7 +730,7 @@ function App() {
                           <button
                             title="Inspect MongoDB Metadata Details"
                             onClick={() => openFileDetails(f)}
-                            className="hover:text-indigo-600"
+                            className="hover:text-emerald-700"
                           >
                             <Info size={16} />
                           </button>
@@ -805,7 +805,7 @@ function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
                   <UploadCloud size={18} />
                 </div>
                 <div>
@@ -839,7 +839,7 @@ function App() {
                   value={uploadFolderId}
                   onChange={(e) => setUploadFolderId(e.target.value)}
                   disabled={uploading}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 bg-slate-50 focus:outline-none focus:border-indigo-500"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 bg-slate-50 focus:outline-none focus:border-emerald-600"
                 >
                   <option value="">Workspace Root (No Folder)</option>
                   {folders.map((fld) => (
@@ -866,10 +866,10 @@ function App() {
                 }}
                 className={`border-2 border-dashed rounded-xl p-6 text-center transition-all flex flex-col items-center justify-center gap-2 cursor-pointer ${
                   isDragging
-                    ? 'border-indigo-500 bg-indigo-50/50'
+                    ? 'border-emerald-600 bg-emerald-50/50'
                     : uploadFileObj
                     ? 'border-emerald-300 bg-emerald-50/20'
-                    : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50'
+                    : 'border-slate-200 hover:border-emerald-500 bg-slate-50/50'
                 }`}
                 onClick={() => {
                   if (!uploading) {
@@ -890,7 +890,7 @@ function App() {
                   }}
                 />
 
-                <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-1">
+                <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center mb-1">
                   <UploadCloud size={24} />
                 </div>
                 <div className="text-xs font-semibold text-slate-700">
@@ -914,11 +914,11 @@ function App() {
                 <div className="flex flex-col gap-1.5 pt-1">
                   <div className="flex justify-between text-xs text-slate-600">
                     <span>Uploading file...</span>
-                    <span className="font-semibold text-indigo-600">{uploadProgress}%</span>
+                    <span className="font-semibold text-emerald-700">{uploadProgress}%</span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                     <div
-                      className="bg-indigo-600 h-2.5 rounded-full transition-all duration-200"
+                      className="bg-emerald-700 h-2.5 rounded-full transition-all duration-200"
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </div>
@@ -938,7 +938,7 @@ function App() {
                 <button
                   type="submit"
                   disabled={uploading || !uploadFileObj}
-                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 shadow-md shadow-emerald-800/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   {uploading ? 'Uploading...' : 'Confirm Upload'}
                 </button>
@@ -954,7 +954,7 @@ function App() {
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <Folder size={18} className="text-indigo-600" />
+                <Folder size={18} className="text-emerald-700" />
                 <h3 className="font-['Manrope'] font-bold text-slate-800 text-base m-0">Create Folder</h3>
               </div>
               <button
@@ -985,7 +985,7 @@ function App() {
                   placeholder="e.g., Contracts, Financials, Audits"
                   value={folderNameInput}
                   onChange={(e) => setFolderNameInput(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:border-indigo-500"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -999,7 +999,7 @@ function App() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30"
+                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 shadow-md shadow-emerald-800/20"
                 >
                   Create Folder
                 </button>
@@ -1015,7 +1015,7 @@ function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
                   <Info size={18} />
                 </div>
                 <div>
@@ -1047,7 +1047,7 @@ function App() {
                     className={`font-semibold px-2 py-0.5 rounded text-[11px] ${
                       fileMetadata.source === 'mongodb'
                         ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-indigo-100 text-indigo-800'
+                        : 'bg-emerald-100 text-emerald-800'
                     }`}
                   >
                     {fileMetadata.source === 'mongodb' ? 'MongoDB (Document Store)' : 'Relational PostgreSQL Index'}
@@ -1085,7 +1085,7 @@ function App() {
 
                 <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 flex flex-col gap-1">
                   <div className="text-[10px] text-slate-400 font-bold uppercase">SHA-256 Digest</div>
-                  <div className="font-mono text-[11px] text-indigo-700 break-all select-all">
+                  <div className="font-mono text-[11px] text-emerald-800 break-all select-all">
                     {fileMetadata.metadata?.sha256}
                   </div>
                 </div>

@@ -5,7 +5,7 @@ from typing import Optional
 
 import bcrypt
 import redis
-from app.security_crypto import encrypt_bytes, decrypt_bytes
+from app.security_crypto import encrypt_bytes, decrypt_bytes, encrypt_secret, decrypt_secret
 from app.storage_backend import put_bytes, get_bytes, object_exists, delete_object, health as storage_health
 from jose import jwt, JWTError
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, status, Header
@@ -135,6 +135,28 @@ class VaultFile(Base):
     size: Mapped[int]=mapped_column(Integer)
     created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 
+class UserMfa(Base):
+    __tablename__='user_mfa'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    user_id: Mapped[int]=mapped_column(ForeignKey('users.id'),unique=True,index=True)
+    encrypted_secret: Mapped[str]=mapped_column(Text)
+    nonce: Mapped[str]=mapped_column(String(64))
+    key_version: Mapped[int]=mapped_column(Integer,default=1)
+    enabled: Mapped[bool]=mapped_column(Boolean,default=False)
+    backup_hashes: Mapped[str]=mapped_column(Text,default='[]')
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+class AuthSession(Base):
+    __tablename__='auth_sessions'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    user_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
+    token_hash: Mapped[str]=mapped_column(String(64),unique=True,index=True)
+    ip_address: Mapped[str]=mapped_column(String(100),default='unknown')
+    user_agent: Mapped[str]=mapped_column(String(500),default='unknown')
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    last_active_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    revoked: Mapped[bool]=mapped_column(Boolean,default=False)
+
 class FileKey(Base):
     __tablename__='file_keys'
     id: Mapped[int]=mapped_column(Integer,primary_key=True)
@@ -194,7 +216,7 @@ class RegisterIn(BaseModel):
     name: str=Field(min_length=2,max_length=120)
     email: EmailStr
     password: str=Field(min_length=8,max_length=128)
-class LoginIn(BaseModel): email: EmailStr; password: str
+class LoginIn(BaseModel): email: EmailStr; password: str; otp: Optional[str]=None
 class FolderIn(BaseModel): name: str=Field(min_length=1,max_length=120)
 
 def get_db():
@@ -230,6 +252,19 @@ def log_event(event, user_id=None, details=None):
 def create_token(user):
     now=datetime.now(timezone.utc)
     return jwt.encode({'sub':str(user.id),'role':user.role,'iat':now,'exp':now+timedelta(minutes=JWT_EXPIRE_MINUTES)},JWT_SECRET,algorithm=JWT_ALGORITHM)
+
+def record_session(user:User,token:str,request:Request,db:Session):
+    full_hash=hashlib.sha256(token.encode()).hexdigest()
+    existing=db.scalar(select(AuthSession).where(AuthSession.token_hash==full_hash))
+    if existing:
+        existing.revoked=False
+        existing.last_active_at=datetime.now(timezone.utc)
+        existing.ip_address=request.client.host if request.client else 'unknown'
+        existing.user_agent=request.headers.get('user-agent','unknown')[:500]
+    else:
+        db.add(AuthSession(user_id=user.id,token_hash=full_hash,ip_address=request.client.host if request.client else 'unknown',user_agent=request.headers.get('user-agent','unknown')[:500]))
+    db.commit()
+
 
 def current_user(creds: HTTPAuthorizationCredentials=Depends(bearer),db:Session=Depends(get_db)):
     if not creds: raise HTTPException(401,'Authentication required')
@@ -305,12 +340,13 @@ def health():
     }
 
 @app.post('/api/auth/register',status_code=201)
-def register(data:RegisterIn,db:Session=Depends(get_db)):
+def register(data:RegisterIn,request:Request,db:Session=Depends(get_db)):
     email=data.email.lower().strip()
     if db.scalar(select(User).where(User.email==email)): raise HTTPException(409,'Email is already registered')
     user=User(name=data.name.strip(),email=email,password_hash=bcrypt.hashpw(data.password.encode(),bcrypt.gensalt()).decode(),role='user')
     db.add(user); db.commit(); db.refresh(user); log_event('register',user.id,{'email':email})
     token=create_token(user)
+    record_session(user,token,request,db)
     if cache:
         try: cache.setex(f'session:{user.id}:{hashlib.sha256(token.encode()).hexdigest()[:16]}',JWT_EXPIRE_MINUTES*60,'active')
         except Exception as e: logger.warning(f"Redis session write failed on register: {e}")
@@ -323,7 +359,25 @@ def login(data:LoginIn,request:Request,db:Session=Depends(get_db)):
     user=db.scalar(select(User).where(User.email==data.email.lower().strip()))
     if not user or not bcrypt.checkpw(data.password.encode(),user.password_hash.encode()):
         log_event('login_failed',None,{'email':data.email.lower().strip()}); raise HTTPException(401,'Incorrect email or password')
+    mfa=db.scalar(select(UserMfa).where(UserMfa.user_id==user.id))
+    if mfa and mfa.enabled:
+        valid=False
+        try:
+            secret=decrypt_secret(mfa.encrypted_secret,mfa.nonce,mfa.key_version,f'trustshare:mfa:{user.id}')
+            import pyotp
+            valid=bool(data.otp and pyotp.TOTP(secret).verify(data.otp.strip(),valid_window=1))
+        except Exception as exc:
+            logger.warning(f'MFA verification error: {type(exc).__name__}')
+        if not valid and data.otp:
+            hashes=json.loads(mfa.backup_hashes or '[]')
+            supplied=hashlib.sha256(data.otp.strip().upper().encode()).hexdigest()
+            if supplied in hashes:
+                hashes.remove(supplied); mfa.backup_hashes=json.dumps(hashes); db.commit(); valid=True
+        if not valid:
+            log_event('login_mfa_failed',None,{'email':data.email.lower().strip(),'ip':client_ip})
+            raise HTTPException(401,'A valid authenticator code or backup code is required')
     token=create_token(user)
+    record_session(user,token,request,db)
     if cache:
         try: cache.setex(f'session:{user.id}:{hashlib.sha256(token.encode()).hexdigest()[:16]}',JWT_EXPIRE_MINUTES*60,'active')
         except Exception as e: logger.warning(f"Redis session write failed on login: {e}")
@@ -341,6 +395,8 @@ def logout(creds: HTTPAuthorizationCredentials=Depends(bearer), user:User=Depend
             cache.delete(f'session:{user.id}:{token_hash}')
         except Exception as e:
             logger.warning(f"Redis session deletion failed on logout: {e}")
+    session_record=db.scalar(select(AuthSession).where(AuthSession.token_hash==hashlib.sha256(creds.credentials.encode()).hexdigest())) if creds else None
+    if session_record: session_record.revoked=True; db.commit()
     log_event('logout',user.id)
     return {'message':'Logged out. Session revoked.'}
 

@@ -28,11 +28,12 @@ import {
   Check
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
+import SecurityCenter from './components/SecurityCenter';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const api = axios.create({ baseURL: API });
 
-const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp'];
+const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp'];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MiB
 
 function sizeText(n) {
@@ -47,10 +48,11 @@ function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('landing'); // 'landing' | 'auth' | 'dashboard'
   const [mode, setMode] = useState('login'); // 'login' | 'register' | 'reset'
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', otp: '' });
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [activeFolder, setActiveFolder] = useState(null);
+  const [showSecurityCenter, setShowSecurityCenter] = useState(false);
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -150,7 +152,10 @@ function App() {
     setError('');
     try {
       const path = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
-      const r = await api.post(path, form);
+      const payload = mode === 'register'
+        ? { name: form.name.trim(), email: form.email.trim(), password: form.password }
+        : { email: form.email.trim(), password: form.password, ...(form.otp.trim() ? { otp: form.otp.trim() } : {}) };
+      const r = await api.post(path, payload);
       localStorage.setItem('trustshare_token', r.data.access_token);
       api.defaults.headers.common.Authorization = `Bearer ${r.data.access_token}`;
       setToken(r.data.access_token);
@@ -437,6 +442,19 @@ function App() {
               </label>
 
               {mode === 'login' && (
+                <label>
+                  Authenticator or backup code (if enabled)
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="Enter 6-digit code"
+                    value={form.otp}
+                    onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                  />
+                </label>
+              )}
+
+              {mode === 'login' && (
                 <button
                   type="button"
                   className="forgot"
@@ -506,6 +524,9 @@ function App() {
           onClick={() => setActiveFolder(null)}
         >
           <Files size={18} /> All files <span className="nav-count">{files.length}</span>
+        </button>
+        <button className="nav-item" onClick={() => setShowSecurityCenter(true)}>
+          <ShieldCheck size={18} /> Security Center
         </button>
 
         <div className="folder-head">
@@ -1091,6 +1112,7 @@ function App() {
           </div>
         </div>
       )}
+      {showSecurityCenter && <SecurityCenter token={token} user={user} onClose={() => setShowSecurityCenter(false)} />}
     </div>
   );
 }

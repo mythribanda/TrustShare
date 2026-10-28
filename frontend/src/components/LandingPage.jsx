@@ -1,696 +1,310 @@
 import React, { useState } from 'react';
 import {
   ShieldCheck,
+  LockKeyhole,
   Folder,
   Files,
-  Search,
-  Upload,
-  Plus,
-  LockKeyhole,
-  FileText,
-  FileSpreadsheet,
-  Image as ImageIcon,
+  Share2,
+  KeyRound,
+  Activity,
   HardDrive,
-  Users,
   ArrowRight,
   CheckCircle2,
-  AlertCircle,
-  Database,
-  Activity,
-  Layers,
-  Key,
-  Shield,
-  Server,
-  Download,
   ChevronDown,
-  Sparkles,
-  ExternalLink,
-  Cpu
+  Database,
+  Eye,
+  Clock3,
+  ShieldAlert,
+  Fingerprint,
+  FileLock2
 } from 'lucide-react';
 
-export default function LandingPage({ onGetStarted, onSignIn, health }) {
-  const [activeFaq, setActiveFaq] = useState(null);
-  const [demoTab, setDemoTab] = useState('files');
-  const [demoQuery, setDemoQuery] = useState('');
+const features = [
+  {
+    icon: FileLock2,
+    title: 'Encrypted file storage',
+    description: 'Files are encrypted with AES-256-GCM before they are written to the configured storage backend.'
+  },
+  {
+    icon: Share2,
+    title: 'Controlled sharing',
+    description: 'Create share links with expiry and download limits, revoke links, or share directly with another account.'
+  },
+  {
+    icon: KeyRound,
+    title: 'Account protection',
+    description: 'Add authenticator-based two-step verification, manage backup codes, and review active sessions.'
+  },
+  {
+    icon: Folder,
+    title: 'Organized workspace',
+    description: 'Keep files in folders, search your workspace, and manage uploads from one place.'
+  },
+  {
+    icon: Activity,
+    title: 'Security visibility',
+    description: 'Review available activity and security events, with additional reporting for administrator accounts.'
+  },
+  {
+    icon: LockKeyhole,
+    title: 'Private vault',
+    description: 'Keep selected files behind a separate vault password and an additional encryption layer.'
+  }
+];
 
-  const sampleFiles = [
-    { id: 1, name: 'TrustShare_Architecture_Doc.pdf', type: 'PDF', size: '2.4 MB', hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', folder: 'Architecture', date: '2026-10-14' },
-    { id: 2, name: 'Security_Audit_Report_Q3.docx', type: 'DOCX', size: '1.1 MB', hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4', folder: 'Compliance', date: '2026-10-13' },
-    { id: 3, name: 'User_Role_Matrix_2026.xlsx', type: 'XLSX', size: '640 KB', hash: 'd57a68d169ccee7e7175f97fbecd86ff215057a594514f0003d1c159a0491a47', folder: 'Compliance', date: '2026-10-12' },
-    { id: 4, name: 'Cryptographic_Keys_Overview.png', type: 'PNG', size: '3.8 MB', hash: '2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae', folder: 'Media', date: '2026-10-10' },
-  ];
+const faqs = [
+  {
+    question: 'Does the landing page show my actual files?',
+    answer: 'No file names, file counts, checksums, or activity are fabricated on this page. Sign in to see the files and account data returned for your own workspace.'
+  },
+  {
+    question: 'How are files protected?',
+    answer: 'The current security branch includes AES-256-GCM file encryption and per-file key metadata. Configure your own master key and storage settings before using it with important data.'
+  },
+  {
+    question: 'Can I share files with other people?',
+    answer: 'The app includes expiring and revocable share links and direct sharing features. Access is subject to the configured backend and its authorization checks.'
+  },
+  {
+    question: 'Is the service status shown here live?',
+    answer: 'This landing page does not guess whether the API or its dependencies are healthy. Open the application and check the backend health endpoint or application error messages for current status.'
+  }
+];
 
-  const filteredDemoFiles = sampleFiles.filter(f =>
-    f.name.toLowerCase().includes(demoQuery.toLowerCase()) ||
-    f.folder.toLowerCase().includes(demoQuery.toLowerCase())
+function Brand({ compact = false }) {
+  return (
+    <a href="#top" className="flex items-center gap-3" aria-label="TrustShare home">
+      <span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500 text-white shadow-lg shadow-indigo-500/25">
+        <ShieldCheck size={23} />
+      </span>
+      <span className={compact ? 'text-lg font-bold tracking-tight text-white' : 'text-xl font-bold tracking-tight text-white'}>
+        Trust<span className="text-indigo-300">Share</span>
+      </span>
+    </a>
   );
+}
 
-  const faqs = [
-    {
-      q: 'What is TrustShare Milestone 1?',
-      a: 'Milestone 1 is a production-ready architectural foundation for secure enterprise file management. It integrates React + Tailwind, a high-performance FastAPI service, PostgreSQL for relational entities, MongoDB for activity logs, Redis for caching, JWT bearer auth with bcrypt hashing, and strict file validation.'
-    },
-    {
-      q: 'How does TrustShare verify file integrity?',
-      a: 'Every file uploaded to TrustShare is streamed through a SHA-256 cryptographic hashing pipeline. The resulting 64-character hash is recorded in both PostgreSQL and MongoDB metadata collections, enabling bit-for-bit file verification.'
-    },
-    {
-      q: 'Can TrustShare run standalone without Docker?',
-      a: 'Yes! While Docker Compose provides a one-command multi-service stack (Postgres + Mongo + Redis + FastAPI + Vite), TrustShare includes an intelligent fallback mechanism that runs smoothly with local Python and SQLite when external databases are not running.'
-    },
-    {
-      q: 'What are the supported file types and size limits?',
-      a: 'By default, Milestone 1 allows documents (.pdf, .docx, .xlsx, .csv, .txt) and images (.png, .jpg, .jpeg, .webp) up to 10 MiB per file. All files are assigned collision-resistant UUIDs on disk to prevent path traversal and naming collisions.'
-    },
-    {
-      q: 'What is planned for Milestone 2?',
-      a: 'Milestone 2 expands on this foundation by adding AES-256 encryption at rest with enterprise key management (KMS), S3/Cloud object storage integrations, time-limited secure share links, multi-factor authentication (MFA/TOTP), and OAuth single sign-on.'
-    }
-  ];
+export default function LandingPage({ onGetStarted, onSignIn }) {
+  const [activeFaq, setActiveFaq] = useState(0);
 
   return (
-    <div className="landing-container bg-[#0b1325] text-slate-100 min-h-screen selection:bg-indigo-500 selection:text-white">
-      {/* Top Notification Bar */}
-      <div className="bg-gradient-to-r from-indigo-900/60 via-indigo-700/40 to-indigo-900/60 border-b border-indigo-500/20 px-4 py-2.5 text-center text-xs text-indigo-200 flex items-center justify-center gap-2">
-        <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-        <span className="font-semibold text-white">TrustShare Milestone 1</span> — High-Assurance File Management System
-        <span className="hidden sm:inline text-indigo-300">• Multi-DB Architecture Active</span>
+    <main id="top" className="min-h-screen overflow-hidden bg-[#080d19] text-slate-100">
+      <div className="border-b border-white/10 bg-white/[0.03]">
+        <div className="mx-auto flex max-w-7xl items-center justify-center gap-2 px-4 py-2 text-center text-xs text-slate-300 sm:text-sm">
+          <span className="h-2 w-2 rounded-full bg-indigo-400" />
+          Secure file storage and sharing, with control in your hands
+        </div>
       </div>
 
-      {/* Navigation */}
-      <header className="sticky top-0 z-50 backdrop-blur-md bg-[#0b1325]/85 border-b border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-              <ShieldCheck className="w-6 h-6 text-white" />
-            </div>
-            <div className="font-['Manrope'] text-2xl font-extrabold tracking-tight text-white">
-              trust<span className="text-indigo-400 font-medium">share</span>
-            </div>
-          </div>
-
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
-            <a href="#features" className="hover:text-indigo-400 transition-colors">Features</a>
-            <a href="#demo" className="hover:text-indigo-400 transition-colors">Interactive Demo</a>
-            <a href="#architecture" className="hover:text-indigo-400 transition-colors">Architecture</a>
-            <a href="#security" className="hover:text-indigo-400 transition-colors">Security & RBAC</a>
-            <a href="#faq" className="hover:text-indigo-400 transition-colors">FAQ</a>
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#080d19]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between gap-5 px-4 sm:px-6 lg:px-8">
+          <Brand />
+          <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">
+            <a className="transition hover:text-white" href="#features">Features</a>
+            <a className="transition hover:text-white" href="#security">Security</a>
+            <a className="transition hover:text-white" href="#faq">FAQ</a>
           </nav>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onSignIn}
-              className="px-4 py-2 text-sm font-medium text-slate-200 hover:text-white transition-colors"
-            >
-              Sign In
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button onClick={onSignIn} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white sm:px-4">
+              Sign in
             </button>
-            <button
-              onClick={onGetStarted}
-              className="px-5 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md shadow-indigo-600/30 hover:shadow-indigo-500/40 transition-all flex items-center gap-2"
-            >
-              Launch Workspace
-              <ArrowRight className="w-4 h-4" />
+            <button onClick={onGetStarted} className="inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 sm:px-5">
+              Get started <ArrowRight size={16} />
             </button>
           </div>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden pt-20 pb-28 md:pt-28 md:pb-36">
-        {/* Ambient Gradient Glows */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] bg-indigo-600/15 blur-[140px] pointer-events-none rounded-full" />
-        <div className="absolute top-1/3 right-10 w-[350px] h-[350px] bg-cyan-600/10 blur-[120px] pointer-events-none rounded-full" />
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-950/60 text-xs font-semibold text-indigo-300 mb-8 backdrop-blur-sm">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Zero-Trust Architecture • Role-Based Governance</span>
-          </div>
-
-          <h1 className="font-['Manrope'] text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.12]">
-            Secure File Management Built on{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-indigo-300 to-sky-400">
-              Cryptographic Integrity
-            </span>
-          </h1>
-
-          <p className="mt-7 text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed">
-            Protect, organize, and inspect your business-critical documents with SHA-256 checksums,
-            strict role-based access control, and complete audit event tracking across PostgreSQL, MongoDB, and Redis.
-          </p>
-
-          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button
-              onClick={onGetStarted}
-              className="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-xl shadow-indigo-600/35 hover:scale-[1.02] active:scale-[0.99] transition-all flex items-center justify-center gap-3"
-            >
-              Get Started Free
-              <ArrowRight className="w-5 h-5" />
-            </button>
-            <a
-              href="#demo"
-              className="w-full sm:w-auto px-7 py-4 rounded-xl text-base font-semibold text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 hover:border-slate-600 transition-all flex items-center justify-center gap-2"
-            >
-              View Live Demo
-            </a>
-          </div>
-
-          {/* Quick Metrics Bar */}
-          <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto pt-8 border-t border-slate-800/80">
-            <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/60">
-              <div className="font-['Manrope'] text-2xl font-bold text-indigo-400">SHA-256</div>
-              <div className="text-xs text-slate-400 mt-1 font-medium">Cryptographic Digests</div>
+      <section className="relative">
+        <div className="pointer-events-none absolute left-1/2 top-0 h-[460px] w-[780px] -translate-x-1/2 rounded-full bg-indigo-600/15 blur-[130px]" />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-14 px-4 pb-20 pt-20 sm:px-6 sm:pb-28 sm:pt-28 lg:grid-cols-[1.04fr_.96fr] lg:px-8 lg:pt-32">
+          <div>
+            <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-indigo-300/20 bg-indigo-400/10 px-3.5 py-2 text-xs font-medium text-indigo-200 sm:text-sm">
+              <ShieldCheck size={15} /> Privacy-first file collaboration
             </div>
-            <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/60">
-              <div className="font-['Manrope'] text-2xl font-bold text-sky-400">RBAC</div>
-              <div className="text-xs text-slate-400 mt-1 font-medium">Admin & User Roles</div>
-            </div>
-            <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/60">
-              <div className="font-['Manrope'] text-2xl font-bold text-emerald-400">10 MiB</div>
-              <div className="text-xs text-slate-400 mt-1 font-medium">Quota & Type Validation</div>
-            </div>
-            <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/60">
-              <div className="font-['Manrope'] text-2xl font-bold text-purple-400">Multi-DB</div>
-              <div className="text-xs text-slate-400 mt-1 font-medium">Postgres • Mongo • Redis</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Interactive Showcase / Demo Sandbox */}
-      <section id="demo" className="py-20 bg-slate-900/50 border-y border-slate-800/80 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-12">
-            <div className="text-xs font-bold tracking-widest text-indigo-400 uppercase">Live Workspace Experience</div>
-            <h2 className="font-['Manrope'] text-3xl sm:text-4xl font-extrabold text-white mt-2">
-              Clean. Fast. Completely in your control.
-            </h2>
-            <p className="text-slate-400 mt-3 text-sm sm:text-base">
-              Test how files are indexed, categorized into folders, and assigned verified SHA-256 cryptographic digests in real time.
+            <h1 className="max-w-2xl text-4xl font-semibold leading-[1.1] tracking-[-0.045em] text-white sm:text-6xl lg:text-[68px]">
+              Your files.
+              <span className="block bg-gradient-to-r from-indigo-300 via-violet-200 to-sky-300 bg-clip-text text-transparent">Your access.</span>
+              Your control.
+            </h1>
+            <p className="mt-6 max-w-xl text-base leading-8 text-slate-300 sm:text-lg">
+              Store, organize, and share important files with encryption and access controls designed to help keep your information private.
             </p>
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+              <button onClick={onGetStarted} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-6 py-3.5 text-sm font-semibold text-white shadow-xl shadow-indigo-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-400">
+                Create your workspace <ArrowRight size={17} />
+              </button>
+              <button onClick={onSignIn} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-6 py-3.5 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08]">
+                Sign in to TrustShare
+              </button>
+            </div>
+            <div className="mt-8 flex flex-wrap gap-x-5 gap-y-3 text-xs text-slate-400 sm:text-sm">
+              <span className="inline-flex items-center gap-2"><CheckCircle2 size={15} className="text-emerald-300" /> Encrypted storage</span>
+              <span className="inline-flex items-center gap-2"><CheckCircle2 size={15} className="text-emerald-300" /> Expiring share links</span>
+              <span className="inline-flex items-center gap-2"><CheckCircle2 size={15} className="text-emerald-300" /> Optional MFA</span>
+            </div>
           </div>
 
-          {/* Interactive Window Preview */}
-          <div className="rounded-2xl border border-slate-700/80 bg-[#101a30] shadow-2xl overflow-hidden max-w-5xl mx-auto">
-            {/* Window Title Bar */}
-            <div className="bg-[#0b1324] px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-rose-500/80" />
-                <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-                <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                <span className="ml-2 text-xs font-mono text-slate-400">trustshare.local/workspace/all-files</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-300 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  API {health?.database ? `Online (${health.database})` : 'Online'}
-                </span>
-                <button
-                  onClick={onSignIn}
-                  className="text-xs text-indigo-300 hover:text-white flex items-center gap-1"
-                >
-                  Enter Full App <ExternalLink className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            {/* Mock Workspace Content */}
-            <div className="p-6">
-              {/* Toolbar */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search by file name or folder..."
-                    value={demoQuery}
-                    onChange={(e) => setDemoQuery(e.target.value)}
-                    className="w-full bg-slate-900/90 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                  {demoQuery && (
-                    <button
-                      onClick={() => setDemoQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-
+          <div className="relative mx-auto w-full max-w-[540px]">
+            <div className="absolute -inset-5 rounded-[32px] bg-gradient-to-br from-indigo-500/15 via-violet-500/5 to-sky-500/10 blur-2xl" />
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0d1526] shadow-2xl shadow-black/40">
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center rounded-lg bg-slate-900 border border-slate-700 p-1 text-xs font-medium">
-                    <button
-                      onClick={() => setDemoTab('files')}
-                      className={`px-3 py-1 rounded-md transition-colors ${demoTab === 'files' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      File Inventory ({filteredDemoFiles.length})
-                    </button>
-                    <button
-                      onClick={() => setDemoTab('integrity')}
-                      className={`px-3 py-1 rounded-md transition-colors ${demoTab === 'integrity' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      SHA-256 Hashes
-                    </button>
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-indigo-400/15 text-indigo-200"><Files size={18} /></span>
+                  <div>
+                    <p className="text-sm font-semibold text-white">Your workspace</p>
+                    <p className="mt-0.5 text-xs text-slate-400">A private place for your files</p>
                   </div>
-                  <button
-                    onClick={onGetStarted}
-                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    Upload File
+                </div>
+                <span className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-400">Preview</span>
+              </div>
+              <div className="p-5 sm:p-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                    <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-400/10 text-emerald-200"><FileLock2 size={18} /></span>
+                    <p className="mt-4 text-sm font-semibold text-white">Encrypted files</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">Protection at rest</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                    <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-400/10 text-sky-200"><Share2 size={18} /></span>
+                    <p className="mt-4 text-sm font-semibold text-white">Controlled sharing</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">Expiry and revocation</p>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-xl border border-dashed border-white/15 bg-black/10 px-5 py-8 text-center">
+                  <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-slate-300"><Folder size={22} /></span>
+                  <p className="mt-4 text-sm font-semibold text-white">Your files will appear here</p>
+                  <p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-slate-400">This is an illustrative preview, not sample account data. Sign in to view your real workspace.</p>
+                  <button onClick={onSignIn} className="mt-5 inline-flex items-center gap-2 rounded-lg border border-indigo-300/25 bg-indigo-400/10 px-4 py-2 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-400/15">
+                    Open workspace <ArrowRight size={14} />
                   </button>
                 </div>
-              </div>
-
-              {/* Table Preview */}
-              <div className="overflow-x-auto mt-4">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="text-[11px] uppercase tracking-wider text-slate-400 bg-slate-900/60 border-b border-slate-800">
-                    <tr>
-                      <th className="py-3 px-4 font-semibold">Document Name</th>
-                      <th className="py-3 px-4 font-semibold">Folder</th>
-                      <th className="py-3 px-4 font-semibold">Size</th>
-                      {demoTab === 'integrity' ? (
-                        <th className="py-3 px-4 font-semibold">SHA-256 Digest</th>
-                      ) : (
-                        <th className="py-3 px-4 font-semibold">Validation</th>
-                      )}
-                      <th className="py-3 px-4 font-semibold text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {filteredDemoFiles.map((f) => (
-                      <tr key={f.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-indigo-950/80 border border-indigo-700/40 text-indigo-400 flex items-center justify-center flex-shrink-0">
-                              {f.type === 'PDF' && <FileText className="w-4 h-4" />}
-                              {f.type === 'DOCX' && <FileText className="w-4 h-4 text-sky-400" />}
-                              {f.type === 'XLSX' && <FileSpreadsheet className="w-4 h-4 text-emerald-400" />}
-                              {f.type === 'PNG' && <ImageIcon className="w-4 h-4 text-purple-400" />}
-                            </div>
-                            <div>
-                              <div className="font-semibold text-slate-100">{f.name}</div>
-                              <div className="text-[10px] text-slate-400">Added {f.date}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-[11px] text-slate-300">
-                            <Folder className="w-3 h-3 text-slate-400" />
-                            {f.folder}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-slate-400">{f.size}</td>
-                        {demoTab === 'integrity' ? (
-                          <td className="py-3 px-4 font-mono text-[11px] text-indigo-300 max-w-[240px] truncate" title={f.hash}>
-                            {f.hash.slice(0, 20)}...{f.hash.slice(-8)}
-                          </td>
-                        ) : (
-                          <td className="py-3 px-4">
-                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Checksum Verified
-                            </span>
-                          </td>
-                        )}
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={onGetStarted}
-                            className="p-1.5 rounded-md hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                            title="Sign in to download"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Sandbox Footer Banner */}
-              <div className="mt-6 p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2 text-indigo-200">
-                  <ShieldCheck className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                  <span>Ready to manage your own documents? Launch a personal workspace in under 30 seconds.</span>
-                </div>
-                <button
-                  onClick={onGetStarted}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg whitespace-nowrap shadow-sm"
-                >
-                  Create Your Account
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Core Capabilities / Features */}
-      <section id="features" className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="text-xs font-bold tracking-widest text-indigo-400 uppercase">Engineered for Trust</div>
-          <h2 className="font-['Manrope'] text-3xl sm:text-5xl font-extrabold text-white mt-3">
-            Enterprise Security Without the Complexity
-          </h2>
-          <p className="text-slate-400 mt-4 text-base sm:text-lg">
-            Every feature in TrustShare is designed with defensive security, data privacy, and deterministic reliability at its core.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {/* Card 1 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-indigo-950/80 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <LockKeyhole className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Bcrypt & JWT Auth</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Passwords are salted and hashed using adaptive bcrypt cost factors. Authenticated sessions issue signed HS256 JWT bearer tokens with configurable expiration windows.
-            </p>
-          </div>
-
-          {/* Card 2 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-sky-950/80 border border-sky-500/30 text-sky-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Cryptographic SHA-256</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Files are streamed chunk-by-chunk through a SHA-256 hasher during upload. The immutable digest provides zero-knowledge verification against data tampering or corruption.
-            </p>
-          </div>
-
-          {/* Card 3 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Users className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Role-Based Access (RBAC)</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Strict access levels (<code className="text-indigo-300">admin</code>, <code className="text-indigo-300">user</code>, <code className="text-indigo-300">guest</code>). Admin routes for system oversight are secured behind dependency-injected privilege checks.
-            </p>
-          </div>
-
-          {/* Card 4 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-amber-950/80 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Folder className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Folder Taxonomy & Search</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Organize projects into custom folders, filter files instantly, and perform case-insensitive substring searches across your entire workspace index.
-            </p>
-          </div>
-
-          {/* Card 5 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-purple-950/80 border border-purple-500/30 text-purple-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <HardDrive className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Anti-Traversal Storage</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Stored files are uncoupled from user filenames on disk, assigned UUID-based identifiers, and constrained to an explicit directory vault preventing directory traversal attacks.
-            </p>
-          </div>
-
-          {/* Card 6 */}
-          <div className="p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all group">
-            <div className="w-12 h-12 rounded-xl bg-rose-950/80 border border-rose-500/30 text-rose-400 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Activity className="w-6 h-6" />
-            </div>
-            <h3 className="font-['Manrope'] text-xl font-bold text-white mb-2">Audit Logging Pipeline</h3>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Every sensitive action—registration, login, upload, folder creation, file download, and deletion—is logged with timestamps and actor identities into MongoDB.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Architecture Deep Dive */}
-      <section id="architecture" className="py-24 bg-slate-900/40 border-t border-slate-800/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-16">
-            <div className="text-xs font-bold tracking-widest text-indigo-400 uppercase">Under The Hood</div>
-            <h2 className="font-['Manrope'] text-3xl sm:text-5xl font-extrabold text-white mt-3">
-              Modern Multi-Store Architecture
-            </h2>
-            <p className="text-slate-400 mt-4 text-base sm:text-lg">
-              Combining the structural integrity of relational databases with the flexibility of document stores and in-memory caches.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {/* Relational Layer */}
-            <div className="p-6 rounded-2xl bg-[#0e172a] border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-lg bg-blue-950/80 text-blue-400 flex items-center justify-center mb-4">
-                  <Database className="w-5 h-5" />
-                </div>
-                <h4 className="font-['Manrope'] text-lg font-bold text-white">Relational Layer</h4>
-                <div className="text-xs text-blue-400 font-mono mt-1">PostgreSQL / SQLite</div>
-                <p className="text-slate-400 text-xs mt-3 leading-relaxed">
-                  Stores canonical user accounts, role mappings, folder trees, and authoritative file index metadata with foreign key constraints.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 font-mono">
-                ACID Transactions • Relational
-              </div>
-            </div>
-
-            {/* Document Store */}
-            <div className="p-6 rounded-2xl bg-[#0e172a] border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-lg bg-emerald-950/80 text-emerald-400 flex items-center justify-center mb-4">
-                  <Layers className="w-5 h-5" />
-                </div>
-                <h4 className="font-['Manrope'] text-lg font-bold text-white">Document Store</h4>
-                <div className="text-xs text-emerald-400 font-mono mt-1">MongoDB 7.0</div>
-                <p className="text-slate-400 text-xs mt-3 leading-relaxed">
-                  Holds flexible file metadata documents and chronological audit event streams tracking user access and file lifecycle actions.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 font-mono">
-                Audit Trail • Event Streaming
-              </div>
-            </div>
-
-            {/* Cache & Session */}
-            <div className="p-6 rounded-2xl bg-[#0e172a] border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-lg bg-rose-950/80 text-rose-400 flex items-center justify-center mb-4">
-                  <Cpu className="w-5 h-5" />
-                </div>
-                <h4 className="font-['Manrope'] text-lg font-bold text-white">Cache Layer</h4>
-                <div className="text-xs text-rose-400 font-mono mt-1">Redis 7.0</div>
-                <p className="text-slate-400 text-xs mt-3 leading-relaxed">
-                  Accelerates session validations, active token tracking, and provides sub-millisecond lookup latency for rapid authorization.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 font-mono">
-                In-Memory • Low Latency
-              </div>
-            </div>
-
-            {/* API Engine */}
-            <div className="p-6 rounded-2xl bg-[#0e172a] border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="w-10 h-10 rounded-lg bg-indigo-950/80 text-indigo-400 flex items-center justify-center mb-4">
-                  <Server className="w-5 h-5" />
-                </div>
-                <h4 className="font-['Manrope'] text-lg font-bold text-white">API Engine</h4>
-                <div className="text-xs text-indigo-400 font-mono mt-1">FastAPI + Uvicorn</div>
-                <p className="text-slate-400 text-xs mt-3 leading-relaxed">
-                  High-throughput asynchronous Python gateway with automatic OpenAPI documentation, strict Pydantic schemas, and CORS governance.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800 text-[11px] text-slate-400 font-mono">
-                OpenAPI Docs • Asynchronous
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Milestone Roadmap Comparison */}
-      <section id="security" className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="text-xs font-bold tracking-widest text-indigo-400 uppercase">Product Roadmap</div>
-          <h2 className="font-['Manrope'] text-3xl sm:text-5xl font-extrabold text-white mt-3">
-            Milestone 1 Scope & Future Evolution
-          </h2>
-          <p className="text-slate-400 mt-4 text-base sm:text-lg">
-            A clear view of currently delivered foundation capabilities versus planned Milestone 2 security features.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          {/* Milestone 1 (Current) */}
-          <div className="p-8 rounded-2xl bg-indigo-950/30 border-2 border-indigo-500/40 relative">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-xs font-semibold text-emerald-400 mb-4">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              Milestone 1 — Live & Fully Operational
-            </div>
-            <h3 className="font-['Manrope'] text-2xl font-bold text-white mb-4">Foundation Security</h3>
-            <ul className="space-y-3.5 text-sm text-slate-300">
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Bcrypt password hashing & HS256 JWT bearer authentication</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>SHA-256 cryptographic file checksumming during upload</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Strict extension whitelist & 10 MiB quota enforcement</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Role-Based Access Control (Admin, User, Guest) & protected routes</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Multi-tier database persistence (PostgreSQL + MongoDB + Redis)</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Full folder hierarchy, instant search, and local file storage</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Milestone 2 (Roadmap) */}
-          <div className="p-8 rounded-2xl bg-slate-900/60 border border-slate-800">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-950/80 border border-purple-500/30 text-xs font-semibold text-purple-300 mb-4">
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              Milestone 2 — In Engineering
-            </div>
-            <h3 className="font-['Manrope'] text-2xl font-bold text-white mb-4">Advanced Enterprise Layer</h3>
-            <ul className="space-y-3.5 text-sm text-slate-400">
-              <li className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 text-slate-500">2</div>
-                <span>Envelope AES-256-GCM encryption at rest with KMS key rotation</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 text-slate-500">2</div>
-                <span>AWS S3 / Google Cloud Storage multi-cloud object backend</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 text-slate-500">2</div>
-                <span>Time-expiring secure share links with password and download limits</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 text-slate-500">2</div>
-                <span>Hardware token & TOTP Multi-Factor Authentication (MFA)</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 text-slate-500">2</div>
-                <span>OAuth 2.0 / SAML Single Sign-On (Google, Microsoft, Okta)</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ Section */}
-      <section id="faq" className="py-24 bg-slate-900/40 border-t border-slate-800/80">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <div className="text-xs font-bold tracking-widest text-indigo-400 uppercase">Answers & Information</div>
-            <h2 className="font-['Manrope'] text-3xl sm:text-4xl font-extrabold text-white mt-2">
-              Frequently Asked Questions
-            </h2>
-          </div>
-
-          <div className="space-y-4">
-            {faqs.map((faq, idx) => (
-              <div
-                key={idx}
-                className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden transition-colors"
-              >
-                <button
-                  onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
-                  className="w-full px-6 py-4 text-left font-semibold text-slate-100 flex items-center justify-between gap-4 text-sm sm:text-base hover:text-indigo-300 transition-colors"
-                >
-                  <span>{faq.q}</span>
-                  <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform ${activeFaq === idx ? 'rotate-180 text-indigo-400' : ''}`}
-                  />
-                </button>
-                {activeFaq === idx && (
-                  <div className="px-6 pb-5 text-sm text-slate-300 leading-relaxed border-t border-slate-800/60 pt-3">
-                    {faq.a}
+                <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3.5">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-400/10 text-violet-200"><Fingerprint size={18} /></span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-200">Security controls</p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400">MFA, session management, and audit visibility</p>
                   </div>
-                )}
+                  <LockKeyhole size={16} className="ml-auto shrink-0 text-slate-500" />
+                </div>
               </div>
+              <div className="border-t border-white/10 bg-white/[0.025] px-5 py-3 text-[11px] text-slate-500">
+                Interface preview only · no fabricated file records or live status claims
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" className="border-y border-white/[0.08] bg-white/[0.02] py-20 sm:py-24">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto mb-12 max-w-2xl text-center sm:mb-16">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Built for everyday security</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Everything important, in one place.</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">A straightforward workspace for file management, sharing, and account security.</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {features.map(({ icon: Icon, title, description }) => (
+              <article key={title} className="group rounded-2xl border border-white/10 bg-[#0c1424] p-6 transition duration-200 hover:-translate-y-1 hover:border-indigo-300/30 hover:bg-[#101a2e] sm:p-7">
+                <span className="grid h-11 w-11 place-items-center rounded-xl border border-indigo-300/15 bg-indigo-400/10 text-indigo-200 transition group-hover:bg-indigo-400/15"><Icon size={21} /></span>
+                <h3 className="mt-5 text-lg font-semibold text-white">{title}</h3>
+                <p className="mt-2 text-sm leading-7 text-slate-400">{description}</p>
+              </article>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-24 relative overflow-hidden">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
-          <div className="p-10 sm:p-14 rounded-3xl bg-gradient-to-b from-indigo-900/60 via-indigo-950/40 to-[#0b1325] border border-indigo-500/30 shadow-2xl relative">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto mb-6 shadow-xl shadow-indigo-500/40">
-              <ShieldCheck className="w-9 h-9" />
+      <section id="security" className="py-20 sm:py-24">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:items-center lg:px-8">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Security by design</p>
+            <h2 className="mt-4 max-w-xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">Protection should be built in — not bolted on.</h2>
+            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-400 sm:text-base">TrustShare brings file encryption, controlled access, and account security tools together. Security still depends on correct configuration, strong secrets, and deployment practices.</p>
+            <button onClick={onGetStarted} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-100">
+              Get started <ArrowRight size={16} />
+            </button>
+          </div>
+          <div className="grid gap-3">
+            <div className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-300/10 text-emerald-200"><FileLock2 size={21} /></span>
+              <div><h3 className="font-semibold text-white">Authenticated encryption</h3><p className="mt-1 text-sm leading-6 text-slate-400">AES-256-GCM helps protect file confidentiality and detect unauthorized changes to encrypted content.</p></div>
             </div>
-
-            <h2 className="font-['Manrope'] text-3xl sm:text-4xl font-extrabold text-white">
-              Ready to take control of your workspace?
-            </h2>
-            <p className="mt-4 text-slate-300 max-w-xl mx-auto text-sm sm:text-base">
-              Set up your account in seconds and experience secure, organized document management built on verified integrity.
-            </p>
-
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <button
-                onClick={onGetStarted}
-                className="w-full sm:w-auto px-8 py-3.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/40 transition-all flex items-center justify-center gap-2"
-              >
-                Create Free Account
-                <ArrowRight className="w-4 h-4" />
-              </button>
-              <button
-                onClick={onSignIn}
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl text-sm font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 transition-all"
-              >
-                Sign In to Existing Workspace
-              </button>
+            <div className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-sky-300/10 text-sky-200"><Clock3 size={21} /></span>
+              <div><h3 className="font-semibold text-white">Time-limited sharing</h3><p className="mt-1 text-sm leading-6 text-slate-400">Share links can be configured with expiration and download limits, and can be revoked.</p></div>
+            </div>
+            <div className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-300/10 text-violet-200"><ShieldAlert size={21} /></span>
+              <div><h3 className="font-semibold text-white">Account and audit controls</h3><p className="mt-1 text-sm leading-6 text-slate-400">Authenticator-based MFA, session revocation, and security-event views help users review account activity.</p></div>
+            </div>
+            <div className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-300/10 text-amber-200"><HardDrive size={21} /></span>
+              <div><h3 className="font-semibold text-white">Storage configuration matters</h3><p className="mt-1 text-sm leading-6 text-slate-400">Use a strong master key and verify the configured storage provider before storing important documents.</p></div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-800 bg-[#080d1a] py-12 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-            <span className="font-['Manrope'] font-bold text-slate-300 text-sm">
-              trust<span className="text-indigo-400">share</span>
-            </span>
-            <span className="text-slate-600">|</span>
-            <span>Milestone 1 Local Foundation</span>
-          </div>
-
-          <div className="flex items-center gap-6 text-slate-400">
-            <button onClick={onSignIn} className="hover:text-white transition-colors">Sign In</button>
-            <button onClick={onGetStarted} className="hover:text-white transition-colors">Register</button>
-            <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">
-              API Docs (Swagger)
-            </a>
-          </div>
-
+      <section className="border-y border-white/[0.08] bg-white/[0.02] py-20">
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:px-6 lg:grid-cols-[.8fr_1.2fr] lg:items-center lg:px-8">
           <div>
-            © 2026 TrustShare. Built for secure, auditable file collaboration.
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Simple workflow</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">From upload to sharing, without the clutter.</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-400">Use the workspace to manage your files and account controls in a few clear steps.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-[#0c1424] p-5"><span className="text-xs font-semibold text-indigo-300">01 / STORE</span><h3 className="mt-3 font-semibold text-white">Upload files</h3><p className="mt-2 text-sm leading-6 text-slate-400">Add supported documents to your private workspace.</p></div>
+            <div className="rounded-xl border border-white/10 bg-[#0c1424] p-5"><span className="text-xs font-semibold text-indigo-300">02 / ORGANIZE</span><h3 className="mt-3 font-semibold text-white">Keep it tidy</h3><p className="mt-2 text-sm leading-6 text-slate-400">Use folders and search to find what you need.</p></div>
+            <div className="rounded-xl border border-white/10 bg-[#0c1424] p-5"><span className="text-xs font-semibold text-indigo-300">03 / SHARE</span><h3 className="mt-3 font-semibold text-white">Control access</h3><p className="mt-2 text-sm leading-6 text-slate-400">Choose a sharing method and review its access settings.</p></div>
           </div>
         </div>
+      </section>
+
+      <section id="faq" className="py-20 sm:py-24">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-10 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Clear answers</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Frequently asked questions</h2>
+          </div>
+          <div className="space-y-3">
+            {faqs.map((faq, index) => (
+              <article key={faq.question} className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+                <button onClick={() => setActiveFaq(activeFaq === index ? -1 : index)} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-semibold text-white sm:px-6">
+                  {faq.question}
+                  <ChevronDown size={17} className={`shrink-0 text-slate-400 transition-transform ${activeFaq === index ? 'rotate-180' : ''}`} />
+                </button>
+                {activeFaq === index && <p className="border-t border-white/10 px-5 pb-5 pt-4 text-sm leading-7 text-slate-400 sm:px-6">{faq.answer}</p>}
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
+        <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/20 via-[#111b32] to-[#0d1525] px-6 py-12 text-center sm:px-12 sm:py-16">
+          <div className="pointer-events-none absolute left-1/2 top-0 h-64 w-96 -translate-x-1/2 rounded-full bg-indigo-400/10 blur-3xl" />
+          <span className="relative mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-indigo-200/20 bg-indigo-300/10 text-indigo-100"><ShieldCheck size={28} /></span>
+          <h2 className="relative mt-6 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Make space for the work that matters.</h2>
+          <p className="relative mx-auto mt-4 max-w-xl text-sm leading-7 text-slate-300 sm:text-base">Create a workspace, keep your files organized, and decide how access is shared.</p>
+          <div className="relative mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <button onClick={onGetStarted} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-indigo-400">Create an account <ArrowRight size={16} /></button>
+            <button onClick={onSignIn} className="rounded-xl border border-white/15 bg-white/[0.04] px-6 py-3.5 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.08]">I already have an account</button>
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-white/10 bg-black/10">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-8 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <Brand compact />
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <a href="#features" className="transition hover:text-slate-300">Features</a>
+            <a href="#security" className="transition hover:text-slate-300">Security</a>
+            <a href="#faq" className="transition hover:text-slate-300">FAQ</a>
+          </div>
+          <span>TrustShare · Secure file management and sharing</span>
+        </div>
       </footer>
-    </div>
+    </main>
   );
 }

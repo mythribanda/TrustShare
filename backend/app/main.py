@@ -5,6 +5,7 @@ from typing import Optional
 
 import bcrypt
 import redis
+from app.security_crypto import encrypt_bytes, decrypt_bytes
 from jose import jwt, JWTError
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,6 +93,16 @@ class FileShare(Base):
     token_hash: Mapped[str]=mapped_column(String(64),unique=True,index=True)
     expires_at: Mapped[datetime]=mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool]=mapped_column(Boolean,default=False)
+
+class FileKey(Base):
+    __tablename__='file_keys'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    file_id: Mapped[int]=mapped_column(ForeignKey('files.id'),unique=True,index=True)
+    wrapped_key: Mapped[str]=mapped_column(Text)
+    wrap_nonce: Mapped[str]=mapped_column(String(64))
+    key_version: Mapped[int]=mapped_column(Integer,default=1)
+    algorithm: Mapped[str]=mapped_column(String(30),default='AES-256-GCM')
+    created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 
 Base.metadata.create_all(bind=engine)
 def init_redis(url: str):
@@ -300,9 +311,12 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
             if size>MAX_UPLOAD_BYTES: raise HTTPException(413,f'File exceeds {MAX_UPLOAD_BYTES//1024//1024} MiB limit')
             digest.update(chunk); chunks.append(chunk)
         if size==0: raise HTTPException(400,'Empty files are not allowed')
-        with dest.open('wb') as out: out.write(encrypt_bytes(b''.join(chunks),stored))
+        encrypted,wrapped_key,wrap_nonce,key_version=encrypt_bytes(b''.join(chunks),stored)
+        with dest.open('wb') as out: out.write(encrypted)
         record=StoredFile(original_name=original,stored_name=stored,content_type=file.content_type or 'application/octet-stream',size=size,sha256=digest.hexdigest(),owner_id=user.id,folder_id=folder_id)
-        db.add(record); db.commit(); db.refresh(record)
+        db.add(record); db.flush()
+        db.add(FileKey(file_id=record.id,wrapped_key=wrapped_key,wrap_nonce=wrap_nonce,key_version=key_version))
+        db.commit(); db.refresh(record)
         metadata={**file_dict(record),'stored_name':stored,'event':'file_uploaded'}
         if mongo_available and mdb is not None:
             try:
@@ -322,8 +336,15 @@ def download_file(file_id:int,user:User=Depends(current_user),db:Session=Depends
     if not record: raise HTTPException(404,'File not found')
     path=STORAGE/record.stored_name
     if not path.is_file(): raise HTTPException(404,'Stored file is missing')
-    try: plaintext=decrypt_bytes(path.read_bytes(),record.stored_name)
-    except Exception: raise HTTPException(500,'Could not decrypt stored file')
+    key_record=db.scalar(select(FileKey).where(FileKey.file_id==record.id))
+    try:
+        if key_record:
+            plaintext=decrypt_bytes(path.read_bytes(),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
+        else:
+            plaintext=path.read_bytes()
+    except Exception:
+        log_event('file_decryption_failed',user.id,{'file_id':file_id})
+        raise HTTPException(500,'Could not decrypt stored file')
     log_event('file_downloaded',user.id,{'file_id':file_id})
     return Response(content=plaintext,media_type=record.content_type,headers={'Content-Disposition':f'attachment; filename="{record.original_name}"'})
 
@@ -359,8 +380,13 @@ def public_share(token:str,db:Session=Depends(get_db)):
     if not sh or sh.revoked or sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc): raise HTTPException(404,'Share expired or revoked')
     f=db.get(StoredFile,sh.file_id)
     if not f: raise HTTPException(404,'File not found')
-    try: data=decrypt_bytes((STORAGE/f.stored_name).read_bytes(),f.stored_name)
-    except Exception: raise HTTPException(500,'Unable to decrypt file')
+    try:
+        key_record=db.scalar(select(FileKey).where(FileKey.file_id==f.id))
+        stored_bytes=(STORAGE/f.stored_name).read_bytes()
+        data=decrypt_bytes(stored_bytes,f.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version) if key_record else stored_bytes
+    except Exception:
+        log_event('shared_file_decryption_failed',None,{'file_id':f.id})
+        raise HTTPException(500,'Unable to decrypt file')
     log_event('shared_file_downloaded',None,{'file_id':f.id})
     return Response(content=data,media_type=f.content_type,headers={'Content-Disposition':f'attachment; filename="{f.original_name}"'})
 

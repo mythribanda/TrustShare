@@ -460,7 +460,74 @@ def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(g
     log_event('file_deleted',user.id,{'file_id':file_id}); return {'message':'File deleted'}
 
 class ShareCreateIn(BaseModel):
-    expires_in_hours:int=Field(default=24,ge=1,le=168)
+    expires_in_hours:int=Field(default=24,ge=1,le=720)
+    max_downloads:Optional[int]=Field(default=None,ge=1,le=10000)
+    permission:str=Field(default='download',pattern='^(view|download)
+
+@app.post('/api/files/{file_id}/shares',status_code=201)
+def create_share(file_id:int,request:Request,data:ShareCreateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    f=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
+    if not f: raise HTTPException(404,'File not found')
+    token=secrets.token_urlsafe(32)
+    sh=FileShare(file_id=file_id,owner_id=user.id,token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=datetime.now(timezone.utc)+timedelta(hours=data.expires_in_hours))
+    db.add(sh); db.flush()
+    db.add(SharePolicy(share_id=sh.id,max_downloads=data.max_downloads,download_count=0,permission=data.permission))
+    db.commit(); db.refresh(sh); log_event('share_created',user.id,{'file_id':file_id,'share_id':sh.id,'expires_at':sh.expires_at.isoformat()})
+    return {'id':sh.id,'url':str(request.base_url).rstrip('/')+'/share/'+token,'expires_at':sh.expires_at.isoformat(),'max_downloads':data.max_downloads,'permission':data.permission}
+
+@app.get('/share/{token}')
+def public_share(token:str,db:Session=Depends(get_db)):
+    sh=db.scalar(select(FileShare).where(FileShare.token_hash==hashlib.sha256(token.encode()).hexdigest()))
+    if not sh or sh.revoked or sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc): raise HTTPException(404,'Share expired or revoked')
+    policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
+    if policy and policy.max_downloads is not None and policy.download_count>=policy.max_downloads:
+        log_event('share_limit_reached',None,{'share_id':sh.id,'file_id':sh.file_id})
+        raise HTTPException(410,'Share download limit reached')
+    f=db.get(StoredFile,sh.file_id)
+    if not f: raise HTTPException(404,'File not found')
+    try:
+        key_record=db.scalar(select(FileKey).where(FileKey.file_id==f.id))
+        stored_bytes=(STORAGE/f.stored_name).read_bytes()
+        data=decrypt_bytes(stored_bytes,f.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version) if key_record else stored_bytes
+    except Exception:
+        log_event('shared_file_decryption_failed',None,{'file_id':f.id})
+        raise HTTPException(500,'Unable to decrypt file')
+    if policy:
+        policy.download_count+=1
+        db.commit()
+    log_event('shared_file_downloaded',None,{'file_id':f.id,'share_id':sh.id,'permission':policy.permission if policy else 'download'})
+    disposition='inline' if policy and policy.permission=='view' else 'attachment'
+    return Response(content=data,media_type=f.content_type,headers={'Content-Disposition':f'{disposition}; filename="{f.original_name}"','X-Content-Type-Options':'nosniff'})
+
+@app.post('/api/shares/{share_id}/revoke')
+def revoke_share(share_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    sh=db.scalar(select(FileShare).where(FileShare.id==share_id,FileShare.owner_id==user.id))
+    if not sh: raise HTTPException(404,'Share not found')
+    sh.revoked=True; db.commit(); log_event('share_revoked',user.id,{'share_id':share_id})
+    return {'message':'Share revoked'}
+
+@app.get('/api/dashboard/user')
+def user_dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    fs=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all()
+    ss=db.scalars(select(FileShare).where(FileShare.owner_id==user.id)).all()
+    return {'stats':{'files':len(fs),'storage_bytes':sum(x.size for x in fs),'shares_total':len(ss),'role':user.role}}
+
+@app.get('/api/dashboard/admin')
+def admin_dashboard(user:User=Depends(require_roles('admin')),db:Session=Depends(get_db)):
+    fs=db.scalars(select(StoredFile)).all(); us=db.scalars(select(User)).all()
+    return {'stats':{'users_total':len(us),'files_total':len(fs),'storage_bytes':sum(x.size for x in fs),'shares_total':db.scalar(select(func.count()).select_from(FileShare)) or 0,'database_backend':db_backend,'mongo_available':mongo_available,'redis_available':cache is not None}}
+
+@app.get('/api/dashboard/security')
+def security_dashboard(hours:int=24,user:User=Depends(current_user)):
+    if hours not in (24,168,720): raise HTTPException(422,'Invalid time window')
+    events=[]
+    if mongo_available and mdb is not None:
+        try:
+            cutoff=datetime.now(timezone.utc)-timedelta(hours=hours)
+            events=[{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in e.items()} for e in mdb.activity.find({'timestamp':{'$gte':cutoff}},{'_id':0}).sort('timestamp',-1).limit(100) if e.get('user_id')==user.id or user.role=='admin']
+        except Exception: pass
+    return {'stats':{'events_in_window':len(events),'failed_logins':sum(e.get('event')=='login_failed' for e in events),'downloads':sum(e.get('event') in ('file_downloaded','shared_file_downloaded') for e in events)},'events':events}
+)
 
 @app.post('/api/files/{file_id}/shares',status_code=201)
 def create_share(file_id:int,request:Request,data:ShareCreateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):

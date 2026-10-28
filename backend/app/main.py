@@ -805,23 +805,46 @@ def vault_delete(vault_file_id:int,x_vault_password:str=Header(...),user:User=De
 @app.post('/api/vault/change-password')
 def vault_change_password(data:VaultPasswordChangeIn,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
     old_key=_vault_key(user,x_vault_password,db)
+    if len(data.new_password)<12: raise HTTPException(422,'Vault password must be at least 12 characters')
     if bcrypt.checkpw(data.new_password.encode(),user.password_hash.encode()): raise HTTPException(422,'Vault password must differ from account password')
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all(); vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
-    new_salt=secrets.token_bytes(16); new_key=hashlib.scrypt(data.new_password.encode(),salt=new_salt,n=2**15,r=8,p=1,dklen=32); staged=[]
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all()
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    if not vault: raise HTTPException(404,'Secure Vault has not been configured')
+    new_salt=secrets.token_bytes(16)
+    new_key=hashlib.scrypt(data.new_password.encode(),salt=new_salt,n=2**15,r=8,p=1,dklen=32)
+    staged=[]
     for row in rows:
-        old_blob=get_bytes(row.stored_name,STORAGE); old_nonce=row.nonce; old_sealed=row.sealed_name
-        plain=AESGCM(old_key).decrypt(base64.b64decode(old_nonce),old_blob,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
-        nonce=secrets.token_bytes(12); new_blob=AESGCM(new_key).encrypt(nonce,plain,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
-        name=_vault_open_name(old_key,user.id,row.stored_name,old_sealed); sealed=_vault_seal_name(new_key,user.id,row.stored_name,name)
-        staged.append((row,path,old_blob,old_nonce,old_sealed,new_blob,base64.b64encode(nonce).decode(),sealed))
+        old_blob=get_bytes(row.stored_name,STORAGE)
+        old_nonce=row.nonce
+        old_sealed=row.sealed_name
+        aad=f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode()
+        plain=AESGCM(old_key).decrypt(base64.b64decode(old_nonce),old_blob,aad)
+        nonce=secrets.token_bytes(12)
+        new_blob=AESGCM(new_key).encrypt(nonce,plain,aad)
+        name=_vault_open_name(old_key,user.id,row.stored_name,old_sealed)
+        sealed=_vault_seal_name(new_key,user.id,row.stored_name,name)
+        staged.append((row,old_blob,old_nonce,old_sealed,new_blob,base64.b64encode(nonce).decode(),sealed))
+    applied=[]
     try:
-        for row,path,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged:
-            put_bytes(row.stored_name,new_blob,STORAGE); row.nonce=nonce; row.sealed_name=sealed
-        vault.salt=base64.b64encode(new_salt).decode(); vault.verifier=hmac.new(new_key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest(); db.commit()
+        for row,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged:
+            put_bytes(row.stored_name,new_blob,STORAGE)
+            applied.append((row,old_blob,old_nonce,old_sealed))
+            row.nonce=nonce
+            row.sealed_name=sealed
+        vault.salt=base64.b64encode(new_salt).decode()
+        vault.verifier=hmac.new(new_key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+        db.commit()
     except Exception:
-        for row,path,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged: put_bytes(row.stored_name,old_blob,STORAGE); row.nonce=old_nonce; row.sealed_name=old_sealed
-        db.rollback(); raise
+        for row,old_blob,old_nonce,old_sealed in reversed(applied):
+            try:
+                put_bytes(row.stored_name,old_blob,STORAGE)
+            except Exception:
+                logger.exception('Could not restore vault object during password-change rollback')
+            row.nonce=old_nonce
+            row.sealed_name=old_sealed
+        db.rollback()
+        raise HTTPException(500,'Vault password change failed; stored files were restored where possible')
     log_event('vault_password_changed',user.id,{'file_count':len(rows)})
     return {'message':'Vault password changed'}
 

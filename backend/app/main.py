@@ -670,3 +670,158 @@ def export_audit_csv(user:User=Depends(require_roles('admin'))):
         writer.writerow({'timestamp':_csv_safe(row.get('timestamp')),'event':_csv_safe(row.get('event')),'user_id':_csv_safe(row.get('user_id')),'details':_csv_safe(json.dumps(row.get('details',{}),ensure_ascii=False))})
     log_event('admin_audit_export',user.id,{'row_count':len(rows),'days':90})
     return Response(content=out.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="trustshare-audit.csv"','Cache-Control':'no-store'})
+
+class VaultSetupIn(BaseModel):
+    password:str=Field(min_length=12,max_length=128)
+class VaultPasswordChangeIn(BaseModel):
+    new_password:str=Field(min_length=12,max_length=128)
+class ConfirmAccountPasswordIn(BaseModel):
+    password:str=Field(min_length=1,max_length=128)
+
+def _vault_key(user:User,password:str,db:Session):
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    if not vault: raise HTTPException(404,'Secure Vault has not been configured')
+    now=datetime.now(timezone.utc)
+    if vault.locked_until and vault.locked_until.replace(tzinfo=timezone.utc)>now: raise HTTPException(423,'Vault is temporarily locked')
+    key=hashlib.scrypt(password.encode(),salt=base64.b64decode(vault.salt),n=2**15,r=8,p=1,dklen=32)
+    expected=hmac.new(key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected,vault.verifier):
+        vault.failed_attempts+=1
+        if vault.failed_attempts>=5:
+            vault.locked_until=now+timedelta(minutes=15); vault.failed_attempts=0
+            log_event('vault_locked',user.id,{'severity':'high'})
+        db.commit()
+        raise HTTPException(401,'Incorrect vault password')
+    vault.failed_attempts=0; vault.locked_until=None; db.commit()
+    return key
+
+def _vault_seal_name(key:bytes,user_id:int,stored_name:str,name:str):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce=secrets.token_bytes(12)
+    sealed=AESGCM(key).encrypt(nonce,name.encode(),f'trustshare:vault-name:{user_id}:{stored_name}'.encode())
+    return base64.b64encode(nonce+sealed).decode()
+
+def _vault_open_name(key:bytes,user_id:int,stored_name:str,sealed_name:str):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    raw=base64.b64decode(sealed_name)
+    return AESGCM(key).decrypt(raw[:12],raw[12:],f'trustshare:vault-name:{user_id}:{stored_name}'.encode()).decode()
+
+@app.post('/api/vault/setup',status_code=201)
+def vault_setup(data:VaultSetupIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(422,'Vault password must differ from account password')
+    if db.scalar(select(Vault).where(Vault.user_id==user.id)): raise HTTPException(409,'Vault is already configured')
+    salt=secrets.token_bytes(16)
+    key=hashlib.scrypt(data.password.encode(),salt=salt,n=2**15,r=8,p=1,dklen=32)
+    verifier=hmac.new(key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+    db.add(Vault(user_id=user.id,salt=base64.b64encode(salt).decode(),verifier=verifier)); db.commit()
+    log_event('vault_created',user.id)
+    return {'message':'Secure Vault created. The password cannot be recovered if forgotten.'}
+
+@app.get('/api/vault/status')
+def vault_status(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    return {'configured':vault is not None,'file_count':db.scalar(select(func.count()).select_from(VaultFile).where(VaultFile.user_id==user.id)) or 0,'locked_until':vault.locked_until.isoformat() if vault and vault.locked_until else None}
+
+@app.get('/api/vault/files')
+def vault_list(x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db)
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id).order_by(VaultFile.created_at.desc())).all()
+    output=[]
+    for row in rows:
+        try: name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+        except Exception: raise HTTPException(500,'Vault metadata could not be decrypted')
+        output.append({'id':row.id,'name':name,'size':row.size,'content_type':row.content_type,'created_at':row.created_at.isoformat()})
+    log_event('vault_listed',user.id,{'count':len(output)})
+    return output
+
+@app.post('/api/vault/files/upload',status_code=201)
+def vault_upload(file:UploadFile=File(...),x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db)
+    original=Path(file.filename or 'upload').name
+    if Path(original).suffix.lower() not in ALLOWED: raise HTTPException(415,'File type not allowed')
+    content=file.file.read(MAX_UPLOAD_BYTES+1)
+    try:
+        if not content: raise HTTPException(400,'Empty files are not allowed')
+        if len(content)>MAX_UPLOAD_BYTES: raise HTTPException(413,'File is too large')
+        validate_file_content(original,content)
+        quota_bytes=int(os.getenv('USER_STORAGE_QUOTA_MB','100'))*1024*1024
+        regular_bytes=db.scalar(select(func.coalesce(func.sum(StoredFile.size),0)).where(StoredFile.owner_id==user.id)) or 0
+        vault_bytes=db.scalar(select(func.coalesce(func.sum(VaultFile.size),0)).where(VaultFile.user_id==user.id)) or 0
+        if regular_bytes+vault_bytes+len(content)>quota_bytes: raise HTTPException(413,'Your storage quota would be exceeded')
+        stored='vault-'+uuid.uuid4().hex+'.enc'
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce=secrets.token_bytes(12)
+        encrypted=AESGCM(key).encrypt(nonce,content,f'trustshare:vault-file:{user.id}:{stored}'.encode())
+        sealed_name=_vault_seal_name(key,user.id,stored,original)
+        dest=STORAGE/stored; dest.write_bytes(encrypted)
+        row=VaultFile(user_id=user.id,stored_name=stored,sealed_name=sealed_name,nonce=base64.b64encode(nonce).decode(),content_type=file.content_type or 'application/octet-stream',size=len(content))
+        db.add(row); db.commit(); db.refresh(row)
+    except Exception:
+        if 'dest' in locals() and dest.exists(): dest.unlink()
+        db.rollback(); raise
+    finally: file.file.close()
+    log_event('vault_file_uploaded',user.id,{'vault_file_id':row.id,'size':len(content)})
+    return {'id':row.id,'name':original,'size':len(content),'created_at':row.created_at.isoformat()}
+
+@app.get('/api/vault/files/{vault_file_id}/download')
+def vault_download(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db)
+    row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    try:
+        encrypted=(STORAGE/row.stored_name).read_bytes()
+        content=AESGCM(key).decrypt(base64.b64decode(row.nonce),encrypted,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+    except Exception:
+        log_event('vault_decryption_failed',user.id,{'vault_file_id':vault_file_id,'severity':'high'})
+        raise HTTPException(500,'Vault file could not be decrypted')
+    log_event('vault_file_downloaded',user.id,{'vault_file_id':vault_file_id})
+    return Response(content=content,media_type=row.content_type,headers={'Content-Disposition':f'attachment; filename="{name}"','Cache-Control':'no-store'})
+
+@app.delete('/api/vault/files/{vault_file_id}')
+def vault_delete(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    _vault_key(user,x_vault_password,db)
+    row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    path=STORAGE/row.stored_name
+    if path.exists(): path.unlink()
+    db.delete(row); db.commit(); log_event('vault_file_deleted',user.id,{'vault_file_id':vault_file_id})
+    return {'message':'Vault file permanently deleted'}
+
+@app.post('/api/vault/change-password')
+def vault_change_password(data:VaultPasswordChangeIn,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    old_key=_vault_key(user,x_vault_password,db)
+    if bcrypt.checkpw(data.new_password.encode(),user.password_hash.encode()): raise HTTPException(422,'Vault password must differ from account password')
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all()
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    new_salt=secrets.token_bytes(16)
+    new_key=hashlib.scrypt(data.new_password.encode(),salt=new_salt,n=2**15,r=8,p=1,dklen=32)
+    staged=[]
+    for row in rows:
+        old_cipher=(STORAGE/row.stored_name).read_bytes()
+        plain=AESGCM(old_key).decrypt(base64.b64decode(row.nonce),old_cipher,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        nonce=secrets.token_bytes(12)
+        encrypted=AESGCM(new_key).encrypt(nonce,plain,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        old_name=_vault_open_name(old_key,user.id,row.stored_name,row.sealed_name)
+        staged.append((row,encrypted,base64.b64encode(nonce).decode(),_vault_seal_name(new_key,user.id,row.stored_name,old_name)))
+    for row,encrypted,nonce,sealed_name in staged:
+        (STORAGE/row.stored_name).write_bytes(encrypted)
+        row.nonce=nonce; row.sealed_name=sealed_name
+    vault.salt=base64.b64encode(new_salt).decode(); vault.verifier=hmac.new(new_key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+    db.commit(); log_event('vault_password_changed',user.id,{'file_count':len(rows)})
+    return {'message':'Vault password changed'}
+
+@app.post('/api/vault/reset')
+def vault_reset(data:ConfirmAccountPasswordIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if not bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(401,'Account password confirmation failed')
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all()
+    for row in rows:
+        path=STORAGE/row.stored_name
+        if path.exists(): path.unlink()
+        db.delete(row)
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    if vault: db.delete(vault)
+    db.commit(); log_event('vault_reset',user.id,{'deleted_files':len(rows),'severity':'high'})
+    return {'message':'Vault reset; encrypted files were permanently deleted.'}

@@ -4,36 +4,81 @@ import os
 import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-MAGIC = b"TSENC1"
+MAGIC=b"TSE2"
+CHUNK_SIZE=1024*1024
 
-def _master_key():
-    value = os.getenv("ENCRYPTION_MASTER_KEY", "")
-    try:
-        key = base64.b64decode(value, validate=True)
-    except Exception as exc:
-        raise RuntimeError("ENCRYPTION_MASTER_KEY must be base64 for a 32-byte key") from exc
-    if len(key) != 32:
-        raise RuntimeError("ENCRYPTION_MASTER_KEY must decode to exactly 32 bytes")
-    return key
+def _keyring():
+    raw=os.getenv("MASTER_KEYS","").strip()
+    keys={}
+    if raw:
+        for item in raw.split(","):
+            version,key=item.split(":",1)
+            decoded=base64.b64decode(key,validate=True)
+            if len(decoded)!=32:
+                raise RuntimeError("Every MASTER_KEYS value must decode to 32 bytes")
+            keys[int(version)]=decoded
+    else:
+        raw=os.getenv("ENCRYPTION_MASTER_KEY","").strip()
+        if not raw or raw.startswith("replace-with-"):
+            raise RuntimeError("Configure ENCRYPTION_MASTER_KEY or MASTER_KEYS in the backend environment")
+        decoded=base64.b64decode(raw,validate=True)
+        if len(decoded)!=32:
+            raise RuntimeError("ENCRYPTION_MASTER_KEY must decode to exactly 32 bytes")
+        keys[1]=decoded
+    return keys
 
-def encrypt_bytes(plaintext: bytes, file_id: str) -> bytes:
-    data_key = AESGCM.generate_key(bit_length=256)
-    data_nonce = secrets.token_bytes(12)
-    ciphertext = AESGCM(data_key).encrypt(data_nonce, plaintext, file_id.encode())
-    wrap_nonce = secrets.token_bytes(12)
-    wrapped_key = AESGCM(_master_key()).encrypt(wrap_nonce, data_key, file_id.encode())
-    header = json.dumps({"id": file_id, "nonce": base64.b64encode(data_nonce).decode(),
-        "wrap_nonce": base64.b64encode(wrap_nonce).decode(),
-        "wrapped_key": base64.b64encode(wrapped_key).decode()}, separators=(",", ":")).encode()
-    return MAGIC + len(header).to_bytes(4, "big") + header + ciphertext
+def encrypt_bytes(plaintext:bytes,file_context:str):
+    keys=_keyring()
+    version=int(os.getenv("ACTIVE_MASTER_KEY_VERSION",str(max(keys))))
+    if version not in keys:
+        raise RuntimeError("Active master-key version is not present in MASTER_KEYS")
+    dek=AESGCM.generate_key(bit_length=256)
+    prefix=secrets.token_bytes(8)
+    count=(len(plaintext)+CHUNK_SIZE-1)//CHUNK_SIZE
+    header=MAGIC+CHUNK_SIZE.to_bytes(4,"big")+prefix+count.to_bytes(4,"big")
+    chunks=[]
+    cipher=AESGCM(dek)
+    context=file_context.encode()
+    for index,start in enumerate(range(0,len(plaintext),CHUNK_SIZE)):
+        plain=plaintext[start:start+CHUNK_SIZE]
+        final=index==count-1
+        nonce=prefix+index.to_bytes(4,"big")
+        aad=context+index.to_bytes(4,"big")+(b"\x01" if final else b"\x00")
+        encrypted=cipher.encrypt(nonce,plain,aad)
+        chunks.append(len(encrypted).to_bytes(4,"big")+encrypted)
+    wrap_nonce=secrets.token_bytes(12)
+    wrap_aad=context+version.to_bytes(4,"big")
+    wrapped=AESGCM(keys[version]).encrypt(wrap_nonce,dek,wrap_aad)
+    return header+b"".join(chunks),base64.b64encode(wrapped).decode(),base64.b64encode(wrap_nonce).decode(),version
 
-def decrypt_bytes(blob: bytes, file_id: str) -> bytes:
-    if not blob.startswith(MAGIC) or len(blob) < 10:
-        raise ValueError("Stored object is not an encrypted TrustShare file")
-    size = int.from_bytes(blob[6:10], "big")
-    header = json.loads(blob[10:10 + size])
-    if header.get("id") != file_id:
-        raise ValueError("Encrypted file identifier mismatch")
-    decode = lambda key: base64.b64decode(header[key])
-    data_key = AESGCM(_master_key()).decrypt(decode("wrap_nonce"), decode("wrapped_key"), file_id.encode())
-    return AESGCM(data_key).decrypt(decode("nonce"), blob[10 + size:], file_id.encode())
+def decrypt_bytes(blob:bytes,file_context:str,wrapped_key:str,wrap_nonce:str,key_version:int):
+    keys=_keyring()
+    if key_version not in keys:
+        raise ValueError("Master-key version is unavailable")
+    if len(blob)<20 or blob[:4]!=MAGIC:
+        raise ValueError("Encrypted file header is invalid")
+    chunk_size=int.from_bytes(blob[4:8],"big")
+    prefix=blob[8:16]
+    count=int.from_bytes(blob[16:20],"big")
+    if chunk_size!=CHUNK_SIZE or count>100000:
+        raise ValueError("Encrypted file header is invalid")
+    context=file_context.encode()
+    dek=AESGCM(keys[key_version]).decrypt(base64.b64decode(wrap_nonce),base64.b64decode(wrapped_key),context+key_version.to_bytes(4,"big"))
+    cipher=AESGCM(dek)
+    pos=20
+    plaintext=[]
+    for index in range(count):
+        if pos+4>len(blob):
+            raise ValueError("Encrypted file is truncated")
+        size=int.from_bytes(blob[pos:pos+4],"big")
+        pos+=4
+        if size<16 or pos+size>len(blob):
+            raise ValueError("Encrypted file is truncated")
+        encrypted=blob[pos:pos+size]
+        pos+=size
+        final=index==count-1
+        aad=context+index.to_bytes(4,"big")+(b"\x01" if final else b"\x00")
+        plaintext.append(cipher.decrypt(prefix+index.to_bytes(4,"big"),encrypted,aad))
+    if pos!=len(blob):
+        raise ValueError("Encrypted file has trailing data")
+    return b"".join(plaintext)

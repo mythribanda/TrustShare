@@ -498,10 +498,9 @@ def download_file(file_id:int,request:Request,user:User=Depends(current_user),db
     if not object_exists(record.stored_name,STORAGE): raise HTTPException(404,'Stored file is missing')
     key_record=db.scalar(select(FileKey).where(FileKey.file_id==record.id))
     try:
-        if key_record:
-            plaintext=decrypt_bytes(get_bytes(record.stored_name,STORAGE),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
-        else:
-            plaintext=get_bytes(record.stored_name,STORAGE)
+        if not key_record:
+            raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
+        plaintext=decrypt_bytes(get_bytes(record.stored_name,STORAGE),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id})
         raise HTTPException(500,'Could not decrypt stored file')
@@ -572,8 +571,10 @@ def public_share(token:str,db:Session=Depends(get_db)):
     if not f: raise HTTPException(404,'File not found')
     if not object_exists(f.stored_name,STORAGE): raise HTTPException(404,'Stored file is missing')
     try:
-        key=db.scalar(select(FileKey).where(FileKey.file_id==f.id)); blob=get_bytes(f.stored_name,STORAGE)
-        content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version) if key else blob
+        key=db.scalar(select(FileKey).where(FileKey.file_id==f.id))
+        if not key: raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
+        blob=get_bytes(f.stored_name,STORAGE)
+        content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version)
     except Exception:
         log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id}); raise HTTPException(500,'Unable to decrypt file')
     if policy:
@@ -625,8 +626,9 @@ def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(
     f=db.get(StoredFile,file_id); grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id))
     if not f or (f.owner_id!=user.id and grant is None): raise HTTPException(404,'File not found')
     key=db.scalar(select(FileKey).where(FileKey.file_id==file_id))
+    if not key: raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
     try:
-        blob=get_bytes(f.stored_name,STORAGE); content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version) if key else blob
+        blob=get_bytes(f.stored_name,STORAGE); content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version)
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id}); raise HTTPException(500,'Could not preview file')
     return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'inline; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})

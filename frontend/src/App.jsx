@@ -33,7 +33,7 @@ import SecurityCenter from './components/SecurityCenter';
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const api = axios.create({ baseURL: API });
 
-const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp'];
+const ALLOWED_EXTS = ['.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp'];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MiB
 
 function sizeText(n) {
@@ -48,7 +48,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('landing'); // 'landing' | 'auth' | 'dashboard'
   const [mode, setMode] = useState('login'); // 'login' | 'register' | 'reset'
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', otp: '' });
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [activeFolder, setActiveFolder] = useState(null);
@@ -437,6 +437,19 @@ function App() {
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                 />
               </label>
+
+              {mode === 'login' && (
+                <label>
+                  Authenticator or backup code (if enabled)
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="Enter 6-digit code"
+                    value={form.otp}
+                    onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                  />
+                </label>
+              )}
 
               {mode === 'login' && (
                 <button

@@ -457,6 +457,11 @@ def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(g
     if not record: raise HTTPException(404,'File not found')
     path=STORAGE/record.stored_name
     if path.exists(): path.unlink()
+    share_ids=list(db.scalars(select(FileShare.id).where(FileShare.file_id==file_id)).all())
+    if share_ids: db.execute(delete(SharePolicy).where(SharePolicy.share_id.in_(share_ids)))
+    db.execute(delete(FileShare).where(FileShare.file_id==file_id))
+    db.execute(delete(FileGrant).where(FileGrant.file_id==file_id))
+    db.execute(delete(FileKey).where(FileKey.file_id==file_id))
     db.delete(record); db.commit()
     if mongo_available and mdb is not None:
         try:
@@ -464,6 +469,338 @@ def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(g
         except Exception as e:
             logger.warning(f"MongoDB file deletion failed: {e}")
     log_event('file_deleted',user.id,{'file_id':file_id}); return {'message':'File deleted'}
+
+class DirectShareIn(BaseModel):
+    email:EmailStr
+    permission:str=Field(default='view_download',pattern='^(view|view_download)
+    expires_in_hours:int=Field(default=24,ge=1,le=720)
+    max_downloads:Optional[int]=Field(default=None,ge=1,le=10000)
+    permission:str=Field(default='download',pattern='^(view|download)$')
+
+@app.post('/api/files/{file_id}/shares',status_code=201)
+def create_share(file_id:int,request:Request,data:ShareCreateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    f=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
+    if not f: raise HTTPException(404,'File not found')
+    token=secrets.token_urlsafe(32)
+    sh=FileShare(file_id=file_id,owner_id=user.id,token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=datetime.now(timezone.utc)+timedelta(hours=data.expires_in_hours))
+    db.add(sh); db.flush()
+    db.add(SharePolicy(share_id=sh.id,max_downloads=data.max_downloads,download_count=0,permission=data.permission))
+    db.commit(); db.refresh(sh)
+    log_event('share_created',user.id,{'file_id':file_id,'share_id':sh.id,'expires_at':sh.expires_at.isoformat()})
+    return {'id':sh.id,'url':str(request.base_url).rstrip('/')+'/share/'+token,'expires_at':sh.expires_at.isoformat(),'max_downloads':data.max_downloads,'permission':data.permission}
+
+@app.get('/api/shares/links')
+def list_share_links(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    shares=db.scalars(select(FileShare).where(FileShare.owner_id==user.id).order_by(FileShare.id.desc())).all()
+    rows=[]
+    for sh in shares:
+        f=db.get(StoredFile,sh.file_id); policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
+        expired=sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc)
+        rows.append({'id':sh.id,'file_id':sh.file_id,'file_name':f.original_name if f else None,'expires_at':sh.expires_at.isoformat(),'revoked':sh.revoked,'expired':expired,'download_count':policy.download_count if policy else 0,'max_downloads':policy.max_downloads if policy else None,'permission':policy.permission if policy else 'download'})
+    return rows
+
+@app.get('/share/{token}')
+def public_share(token:str,db:Session=Depends(get_db)):
+    token_hash=hashlib.sha256(token.encode()).hexdigest()
+    sh=db.scalar(select(FileShare).where(FileShare.token_hash==token_hash))
+    now=datetime.now(timezone.utc)
+    if not sh or sh.revoked or sh.expires_at.replace(tzinfo=timezone.utc)<now: raise HTTPException(404,'Share expired, revoked, or invalid')
+    policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
+    if policy and policy.max_downloads is not None and policy.download_count>=policy.max_downloads: raise HTTPException(410,'Share download limit reached')
+    f=db.get(StoredFile,sh.file_id)
+    if not f: raise HTTPException(404,'File not found')
+    path=STORAGE/f.stored_name
+    if not path.is_file(): raise HTTPException(404,'Stored file is missing')
+    try:
+        key_record=db.scalar(select(FileKey).where(FileKey.file_id==f.id))
+        blob=path.read_bytes()
+        data=decrypt_bytes(blob,f.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version) if key_record else blob
+    except Exception:
+        log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id})
+        raise HTTPException(500,'Unable to decrypt file')
+    if policy:
+        stmt=update(SharePolicy).where(SharePolicy.id==policy.id)
+        if policy.max_downloads is not None: stmt=stmt.where(SharePolicy.download_count<SharePolicy.max_downloads)
+        result=db.execute(stmt.values(download_count=SharePolicy.download_count+1))
+        db.commit()
+        if result.rowcount!=1: raise HTTPException(410,'Share download limit reached')
+    log_event('shared_file_downloaded',None,{'file_id':f.id,'share_id':sh.id,'permission':policy.permission if policy else 'download'})
+    disposition='inline' if policy and policy.permission=='view' else 'attachment'
+    return Response(content=data,media_type=f.content_type,headers={'Content-Disposition':f'{disposition}; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})
+
+@app.post('/api/shares/{share_id}/revoke')
+def revoke_share(share_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    sh=db.scalar(select(FileShare).where(FileShare.id==share_id,FileShare.owner_id==user.id))
+    if not sh: raise HTTPException(404,'Share not found')
+    sh.revoked=True; db.commit(); log_event('share_revoked',user.id,{'share_id':share_id,'file_id':sh.file_id})
+    return {'message':'Share revoked'}
+
+@app.post('/api/files/{file_id}/direct-shares',status_code=201)
+def direct_share(file_id:int,data:DirectShareIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    f=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
+    if not f: raise HTTPException(404,'File not found')
+    recipient=db.scalar(select(User).where(User.email==data.email.lower().strip()))
+    if not recipient: raise HTTPException(404,'Recipient account not found')
+    if recipient.id==user.id: raise HTTPException(400,'You already own this file')
+    grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==recipient.id))
+    if grant: grant.permission=data.permission
+    else: db.add(FileGrant(file_id=file_id,owner_id=user.id,recipient_id=recipient.id,permission=data.permission))
+    db.commit(); log_event('direct_share_created',user.id,{'file_id':file_id,'recipient_id':recipient.id,'permission':data.permission})
+    return {'message':'File shared with recipient','recipient':recipient.email,'permission':data.permission}
+
+@app.get('/api/shares/direct')
+def list_direct_shares(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    received=db.scalars(select(FileGrant).where(FileGrant.recipient_id==user.id).order_by(FileGrant.id.desc())).all()
+    sent=db.scalars(select(FileGrant).where(FileGrant.owner_id==user.id).order_by(FileGrant.id.desc())).all()
+    def pack(grant,direction):
+        f=db.get(StoredFile,grant.file_id); owner=db.get(User,grant.owner_id); recipient=db.get(User,grant.recipient_id)
+        return {'grant_id':grant.id,'file_id':grant.file_id,'file_name':f.original_name if f else None,'owner_email':owner.email if owner else None,'recipient_email':recipient.email if recipient else None,'permission':grant.permission,'direction':direction,'created_at':grant.created_at.isoformat()}
+    return {'shared_with_me':[pack(x,'received') for x in received],'shared_by_me':[pack(x,'sent') for x in sent]}
+
+@app.delete('/api/shares/direct/{grant_id}')
+def revoke_direct_share(grant_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    grant=db.scalar(select(FileGrant).where(FileGrant.id==grant_id,FileGrant.owner_id==user.id))
+    if not grant: raise HTTPException(404,'Share not found')
+    file_id=grant.file_id; db.delete(grant); db.commit(); log_event('direct_share_revoked',user.id,{'grant_id':grant_id,'file_id':file_id})
+    return {'message':'Direct share revoked'}
+
+@app.get('/api/files/{file_id}/preview')
+def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    f=db.get(StoredFile,file_id)
+    grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id))
+    if not f or (f.owner_id!=user.id and grant is None): raise HTTPException(404,'File not found')
+    path=STORAGE/f.stored_name; key_record=db.scalar(select(FileKey).where(FileKey.file_id==f.id))
+    try:
+        blob=path.read_bytes()
+        content=decrypt_bytes(blob,f.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version) if key_record else blob
+    except Exception:
+        log_event('file_decryption_failed',user.id,{'file_id':file_id})
+        raise HTTPException(500,'Could not preview file')
+    return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'inline; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})
+
+@app.get('/api/dashboard/user')
+def user_dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    files=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all()
+    shares=db.scalars(select(FileShare).where(FileShare.owner_id==user.id)).all()
+    grants=db.scalars(select(FileGrant).where(FileGrant.owner_id==user.id)).all()
+    vault_count=db.scalar(select(func.count()).select_from(VaultFile).where(VaultFile.user_id==user.id)) or 0
+    return {'stats':{'files':len(files),'storage_bytes':sum(x.size for x in files),'shares_total':len(shares),'direct_shares':len(grants),'vault_files':vault_count,'role':user.role}}
+
+@app.get('/api/dashboard/admin')
+def admin_dashboard(user:User=Depends(require_roles('admin')),db:Session=Depends(get_db)):
+    files=db.scalars(select(StoredFile)).all(); users=db.scalars(select(User)).all()
+    events=audit_events_for(user,days=7,admin=True)
+    shares=db.scalars(select(FileShare)).all()
+    return {'stats':{'users_total':len(users),'files_total':len(files),'storage_bytes':sum(x.size for x in files),'shares_total':len(shares),'active_shares':sum(not sh.revoked and sh.expires_at.replace(tzinfo=timezone.utc)>datetime.now(timezone.utc) for sh in shares),'database_backend':db_backend,'mongo_available':mongo_available,'redis_available':cache is not None,'storage_writable':os.access(STORAGE,os.W_OK)},'recent_events':events[:30]}
+
+@app.get('/api/dashboard/security')
+def security_dashboard(hours:int=24,user:User=Depends(current_user)):
+    if hours not in (24,168,720): raise HTTPException(422,'Invalid time window')
+    events=[]
+    if mongo_available and mdb is not None:
+        try:
+            cutoff=datetime.now(timezone.utc)-timedelta(hours=hours)
+            query={'timestamp':{'$gte':cutoff}}
+            if user.role!='admin': query['user_id']=user.id
+            events=[{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in e.items()} for e in mdb.activity.find(query,{'_id':0}).sort('timestamp',-1).limit(200)]
+        except Exception: pass
+    return {'stats':{'events_in_window':len(events),'failed_logins':sum(e.get('event')=='login_failed' for e in events),'blocked_requests':sum(e.get('event')=='request_blocked' for e in events),'downloads':sum(e.get('event') in ('file_downloaded','shared_file_downloaded') for e in events),'vault_alerts':sum('vault' in e.get('event','') and 'locked' in e.get('event','') for e in events)},'events':events}
+
+@app.get('/api/analytics/files')
+def file_analytics(days:int=30,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if days not in (7,30,90): raise HTTPException(422,'days must be 7, 30, or 90')
+    files=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all()
+    events=audit_events_for(user,days)
+    today=datetime.now(timezone.utc).date(); activity={}
+    for i in range(days):
+        day=(today-timedelta(days=days-1-i)).isoformat(); activity[day]={'date':day,'uploads':0,'downloads':0,'shares':0}
+    for event in events:
+        stamp=event.get('timestamp')
+        if not stamp: continue
+        day=str(stamp)[:10]
+        if day not in activity: continue
+        name=event.get('event','')
+        if name=='file_uploaded': activity[day]['uploads']+=1
+        elif name in ('file_downloaded','shared_file_downloaded'): activity[day]['downloads']+=1
+        elif 'share_created' in name: activity[day]['shares']+=1
+    by_type={}
+    for file in files:
+        ext=Path(file.original_name).suffix.lower() or 'no extension'
+        by_type.setdefault(ext,{'type':ext,'files':0,'bytes':0}); by_type[ext]['files']+=1; by_type[ext]['bytes']+=file.size
+    stats={'file_count':len(files),'storage_bytes':sum(x.size for x in files),'uploads_in_period':sum(x['uploads'] for x in activity.values()),'downloads_in_period':sum(x['downloads'] for x in activity.values()),'share_events_in_period':sum(x['shares'] for x in activity.values()),'tracked_events':len(events)}
+    return {'days':days,'stats':stats,'storage_by_type':sorted(by_type.values(),key=lambda x:x['bytes'],reverse=True),'activity':list(activity.values()),'activity_logging':'mongodb' if mongo_available else 'unavailable'}
+
+@app.get('/api/admin/reports/sharing')
+def admin_sharing_report(user:User=Depends(require_roles('admin')),db:Session=Depends(get_db)):
+    shares=db.scalars(select(FileShare).order_by(FileShare.id.desc())).all(); rows=[]
+    for share in shares:
+        file=db.get(StoredFile,share.file_id); owner=db.get(User,share.owner_id); policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==share.id))
+        expired=share.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc)
+        rows.append({'share_id':share.id,'file_id':share.file_id,'file_name':file.original_name if file else None,'owner_email':owner.email if owner else None,'expires_at':share.expires_at.isoformat(),'revoked':share.revoked,'expired':expired,'downloads':policy.download_count if policy else 0,'max_downloads':policy.max_downloads if policy else None,'permission':policy.permission if policy else 'download'})
+    return {'total':len(rows),'active':sum(not x['revoked'] and not x['expired'] for x in rows),'revoked':sum(x['revoked'] for x in rows),'shares':rows}
+
+def _csv_safe(value):
+    value='' if value is None else str(value)
+    if value.lstrip().startswith(('=','+','-','@','\\t','\\r')): return "'"+value
+    return value
+
+@app.get('/api/admin/audit.csv')
+def export_audit_csv(user:User=Depends(require_roles('admin'))):
+    rows=audit_events_for(user,days=90,admin=True); out=io.StringIO()
+    writer=csv.DictWriter(out,fieldnames=['timestamp','event','user_id','details']); writer.writeheader()
+    for row in rows:
+        writer.writerow({'timestamp':_csv_safe(row.get('timestamp')),'event':_csv_safe(row.get('event')),'user_id':_csv_safe(row.get('user_id')),'details':_csv_safe(json.dumps(row.get('details',{}),ensure_ascii=False))})
+    log_event('admin_audit_export',user.id,{'row_count':len(rows),'days':90})
+    return Response(content=out.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="trustshare-audit.csv"','Cache-Control':'no-store'})
+
+class VaultSetupIn(BaseModel):
+    password:str=Field(min_length=12,max_length=128)
+class VaultPasswordChangeIn(BaseModel):
+    new_password:str=Field(min_length=12,max_length=128)
+class ConfirmAccountPasswordIn(BaseModel):
+    password:str=Field(min_length=1,max_length=128)
+
+def _vault_key(user:User,password:str,db:Session):
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    if not vault: raise HTTPException(404,'Secure Vault has not been configured')
+    now=datetime.now(timezone.utc)
+    if vault.locked_until and vault.locked_until.replace(tzinfo=timezone.utc)>now: raise HTTPException(423,'Vault is temporarily locked')
+    key=hashlib.scrypt(password.encode(),salt=base64.b64decode(vault.salt),n=2**15,r=8,p=1,dklen=32)
+    expected=hmac.new(key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected,vault.verifier):
+        vault.failed_attempts+=1
+        if vault.failed_attempts>=5:
+            vault.locked_until=now+timedelta(minutes=15); vault.failed_attempts=0
+            log_event('vault_locked',user.id,{'severity':'high'})
+        db.commit(); raise HTTPException(401,'Incorrect vault password')
+    vault.failed_attempts=0; vault.locked_until=None; db.commit()
+    return key
+
+def _vault_seal_name(key:bytes,user_id:int,stored_name:str,name:str):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce=secrets.token_bytes(12)
+    sealed=AESGCM(key).encrypt(nonce,name.encode(),f'trustshare:vault-name:{user_id}:{stored_name}'.encode())
+    return base64.b64encode(nonce+sealed).decode()
+
+def _vault_open_name(key:bytes,user_id:int,stored_name:str,sealed_name:str):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    raw=base64.b64decode(sealed_name)
+    return AESGCM(key).decrypt(raw[:12],raw[12:],f'trustshare:vault-name:{user_id}:{stored_name}'.encode()).decode()
+
+@app.post('/api/vault/setup',status_code=201)
+def vault_setup(data:VaultSetupIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(422,'Vault password must differ from account password')
+    if db.scalar(select(Vault).where(Vault.user_id==user.id)): raise HTTPException(409,'Vault is already configured')
+    salt=secrets.token_bytes(16); key=hashlib.scrypt(data.password.encode(),salt=salt,n=2**15,r=8,p=1,dklen=32)
+    verifier=hmac.new(key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+    db.add(Vault(user_id=user.id,salt=base64.b64encode(salt).decode(),verifier=verifier)); db.commit()
+    log_event('vault_created',user.id)
+    return {'message':'Vault created. If you forget its password, files cannot be recovered.'}
+
+@app.get('/api/vault/status')
+def vault_status(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    return {'configured':vault is not None,'file_count':db.scalar(select(func.count()).select_from(VaultFile).where(VaultFile.user_id==user.id)) or 0,'locked_until':vault.locked_until.isoformat() if vault and vault.locked_until else None}
+
+@app.get('/api/vault/files')
+def vault_list(x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db); rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id).order_by(VaultFile.created_at.desc())).all()
+    out=[]
+    for row in rows:
+        try: name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+        except Exception: raise HTTPException(500,'Vault metadata could not be decrypted')
+        out.append({'id':row.id,'name':name,'size':row.size,'content_type':row.content_type,'created_at':row.created_at.isoformat()})
+    log_event('vault_listed',user.id,{'count':len(out)})
+    return out
+
+@app.post('/api/vault/files/upload',status_code=201)
+def vault_upload(file:UploadFile=File(...),x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db); name=Path(file.filename or 'upload').name
+    if Path(name).suffix.lower() not in ALLOWED: raise HTTPException(415,'File type not allowed')
+    content=file.file.read(MAX_UPLOAD_BYTES+1)
+    dest=None
+    try:
+        if not content: raise HTTPException(400,'Empty files are not allowed')
+        if len(content)>MAX_UPLOAD_BYTES: raise HTTPException(413,'File is too large')
+        validate_file_content(name,content)
+        quota=int(os.getenv('USER_STORAGE_QUOTA_MB','100'))*1024*1024
+        regular=db.scalar(select(func.coalesce(func.sum(StoredFile.size),0)).where(StoredFile.owner_id==user.id)) or 0
+        secure=db.scalar(select(func.coalesce(func.sum(VaultFile.size),0)).where(VaultFile.user_id==user.id)) or 0
+        if regular+secure+len(content)>quota: raise HTTPException(413,'Your storage quota would be exceeded')
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        stored='vault-'+uuid.uuid4().hex+'.enc'; nonce=secrets.token_bytes(12)
+        encrypted=AESGCM(key).encrypt(nonce,content,f'trustshare:vault-file:{user.id}:{stored}'.encode())
+        sealed=_vault_seal_name(key,user.id,stored,name); dest=STORAGE/stored; dest.write_bytes(encrypted)
+        row=VaultFile(user_id=user.id,stored_name=stored,sealed_name=sealed,nonce=base64.b64encode(nonce).decode(),content_type=file.content_type or 'application/octet-stream',size=len(content))
+        db.add(row); db.commit(); db.refresh(row)
+    except Exception:
+        if dest is not None and dest.exists(): dest.unlink()
+        db.rollback(); raise
+    finally: file.file.close()
+    log_event('vault_file_uploaded',user.id,{'vault_file_id':row.id,'size':len(content)})
+    return {'id':row.id,'name':name,'size':len(content),'created_at':row.created_at.isoformat()}
+
+@app.get('/api/vault/files/{vault_file_id}/download')
+def vault_download(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db); row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    try:
+        content=AESGCM(key).decrypt(base64.b64decode(row.nonce),(STORAGE/row.stored_name).read_bytes(),f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+    except Exception:
+        log_event('vault_decryption_failed',user.id,{'vault_file_id':vault_file_id,'severity':'high'}); raise HTTPException(500,'Vault file could not be decrypted')
+    log_event('vault_file_downloaded',user.id,{'vault_file_id':vault_file_id})
+    return Response(content=content,media_type=row.content_type,headers={'Content-Disposition':f'attachment; filename="{name}"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+@app.delete('/api/vault/files/{vault_file_id}')
+def vault_delete(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    _vault_key(user,x_vault_password,db); row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    path=STORAGE/row.stored_name
+    if path.exists(): path.unlink()
+    db.delete(row); db.commit(); log_event('vault_file_deleted',user.id,{'vault_file_id':vault_file_id})
+    return {'message':'Vault file permanently deleted'}
+
+@app.post('/api/vault/change-password')
+def vault_change_password(data:VaultPasswordChangeIn,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    old_key=_vault_key(user,x_vault_password,db)
+    if bcrypt.checkpw(data.new_password.encode(),user.password_hash.encode()): raise HTTPException(422,'Vault password must differ from account password')
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all(); vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    new_salt=secrets.token_bytes(16); new_key=hashlib.scrypt(data.new_password.encode(),salt=new_salt,n=2**15,r=8,p=1,dklen=32)
+    staged=[]
+    for row in rows:
+        path=STORAGE/row.stored_name; old_cipher=path.read_bytes(); old_nonce=row.nonce; old_sealed=row.sealed_name
+        plain=AESGCM(old_key).decrypt(base64.b64decode(old_nonce),old_cipher,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        nonce=secrets.token_bytes(12); encrypted=AESGCM(new_key).encrypt(nonce,plain,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        filename=_vault_open_name(old_key,user.id,row.stored_name,old_sealed); sealed=_vault_seal_name(new_key,user.id,row.stored_name,filename)
+        staged.append((row,path,old_cipher,old_nonce,old_sealed,encrypted,base64.b64encode(nonce).decode(),sealed))
+    try:
+        for row,path,old_cipher,old_nonce,old_sealed,encrypted,nonce,sealed in staged:
+            path.write_bytes(encrypted); row.nonce=nonce; row.sealed_name=sealed
+        vault.salt=base64.b64encode(new_salt).decode(); vault.verifier=hmac.new(new_key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest()
+        db.commit()
+    except Exception:
+        for row,path,old_cipher,old_nonce,old_sealed,encrypted,nonce,sealed in staged:
+            path.write_bytes(old_cipher); row.nonce=old_nonce; row.sealed_name=old_sealed
+        db.rollback(); raise
+    log_event('vault_password_changed',user.id,{'file_count':len(rows)})
+    return {'message':'Vault password changed'}
+
+@app.post('/api/vault/reset')
+def vault_reset(data:ConfirmAccountPasswordIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if not bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(401,'Account password confirmation failed')
+    rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all()
+    for row in rows:
+        path=STORAGE/row.stored_name
+        if path.exists(): path.unlink()
+        db.delete(row)
+    vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
+    if vault: db.delete(vault)
+    db.commit(); log_event('vault_reset',user.id,{'deleted_files':len(rows),'severity':'high'})
+    return {'message':'Vault reset; encrypted files were permanently deleted.'}
+)
 
 class ShareCreateIn(BaseModel):
     expires_in_hours:int=Field(default=24,ge=1,le=720)
@@ -645,10 +982,6 @@ def export_audit_csv(user:User=Depends(require_roles('admin'))):
         writer.writerow({'timestamp':_csv_safe(row.get('timestamp')),'event':_csv_safe(row.get('event')),'user_id':_csv_safe(row.get('user_id')),'details':_csv_safe(json.dumps(row.get('details',{}),ensure_ascii=False))})
     log_event('admin_audit_export',user.id,{'row_count':len(rows),'days':90})
     return Response(content=out.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="trustshare-audit.csv"','Cache-Control':'no-store'})
-
-class DirectShareIn(BaseModel):
-    email:EmailStr
-    permission:str=Field(default='view_download',pattern='^(view|view_download)$')
 
 class VaultSetupIn(BaseModel):
     password:str=Field(min_length=12,max_length=128)

@@ -31,3 +31,16 @@ Not included (Milestone 2 per PDFs): AES-256 encryption/key management, S3/cloud
 - The default allowed file types are PDF, DOCX, XLSX, CSV, TXT, PNG, JPG/JPEG, and WEBP. Maximum size defaults to 10 MiB.
 - For a demo admin, register a user and run `docker compose exec postgres psql -U trustshare -d trustshare -c "UPDATE users SET role='admin' WHERE email='your-email@example.com';"` then log out/in to obtain a fresh token.
 - Never commit `.env` or use the default secrets in a public deployment.
+
+
+## Milestone 2 security branch
+
+This branch adds AES-256-GCM encryption for newly uploaded files, authenticated owner-only downloads, hashed expiring share tokens with revocation, user/admin dashboard APIs, and a Security Center UI. Existing plaintext files are not automatically migrated; back them up and migrate them before treating the deployment as fully encrypted.
+
+Before uploading files, set `ENCRYPTION_MASTER_KEY` in your local `.env` to a base64-encoded random 32-byte key. Generate one in PowerShell with:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+```
+
+Never commit the actual `.env` or lose this key: encrypted files cannot be decrypted without it. Install updated dependencies with `pip install -r backend/requirements.txt`. This branch has not yet been validated with a full Docker build or end-to-end browser test.

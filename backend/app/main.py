@@ -170,18 +170,7 @@ class FileKey(Base):
 
 Base.metadata.create_all(bind=engine)
 
-def migrate_legacy_file_schema()
-
-def migrate_share_policy_schema():
-    inspector = inspect(engine)
-    if 'share_policies' not in inspector.get_table_names():
-        return
-    columns = {column['name'] for column in inspector.get_columns('share_policies')}
-    if 'password_hash' not in columns:
-        with engine.begin() as connection:
-            connection.execute(text('ALTER TABLE share_policies ADD COLUMN password_hash VARCHAR(255)'))
-
-migrate_share_policy_schema():
+def migrate_legacy_file_schema():
     """Add columns missing from older SQLite databases without deleting user data."""
     if engine.dialect.name != "sqlite":
         return

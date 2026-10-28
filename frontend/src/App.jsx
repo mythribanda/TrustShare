@@ -28,6 +28,7 @@ import {
   Check
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
+import SecurityCenter from './components/SecurityCenter';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const api = axios.create({ baseURL: API });
@@ -51,6 +52,7 @@ function App() {
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [activeFolder, setActiveFolder] = useState(null);
+  const [showSecurityCenter, setShowSecurityCenter] = useState(false);
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -506,6 +508,9 @@ function App() {
           onClick={() => setActiveFolder(null)}
         >
           <Files size={18} /> All files <span className="nav-count">{files.length}</span>
+        </button>
+        <button className="nav-item" onClick={() => setShowSecurityCenter(true)}>
+          <ShieldCheck size={18} /> Security Center
         </button>
 
         <div className="folder-head">
@@ -1091,6 +1096,7 @@ function App() {
           </div>
         </div>
       )}
+      {showSecurityCenter && <SecurityCenter token={token} user={user} onClose={() => setShowSecurityCenter(false)} />}
     </div>
   );
 }

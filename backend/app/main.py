@@ -564,7 +564,10 @@ class DirectShareIn(BaseModel):
 class ShareCreateIn(BaseModel):
     expires_in_hours:int=Field(default=24,ge=1,le=720)
     max_downloads:Optional[int]=Field(default=None,ge=1,le=10000)
-    permission:str=Field(default='download',pattern='^(view|download)
+    permission:str=Field(default='download',pattern='^(view|download)$')
+    password:Optional[str]=Field(default=None,min_length=8,max_length=128)
+
+class VaultSetupIn(BaseModel):
     password:str=Field(min_length=12,max_length=128)
 class VaultPasswordChangeIn(BaseModel):
     new_password:str=Field(min_length=12,max_length=128)

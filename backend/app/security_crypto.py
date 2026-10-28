@@ -99,3 +99,27 @@ def decrypt_secret(encrypted:str, nonce:str, version:int, context:str):
     aad=(context+":"+str(version)).encode()
     raw=AESGCM(keys[version]).decrypt(base64.b64decode(nonce),base64.b64decode(encrypted),aad)
     return raw.decode()
+
+
+def rewrap_key(wrapped_key:str,wrap_nonce:str,old_version:int,file_context:str):
+    keys=_keyring()
+    if old_version not in keys:
+        raise ValueError("Old master-key version is unavailable")
+    active=int(os.getenv("ACTIVE_MASTER_KEY_VERSION",str(max(keys))))
+    if active not in keys:
+        raise ValueError("Active master-key version is unavailable")
+    if active==old_version:
+        return wrapped_key,wrap_nonce,old_version
+    context=file_context.encode()
+    dek=AESGCM(keys[old_version]).decrypt(
+        base64.b64decode(wrap_nonce),
+        base64.b64decode(wrapped_key),
+        context+old_version.to_bytes(4,"big")
+    )
+    nonce=secrets.token_bytes(12)
+    wrapped=AESGCM(keys[active]).encrypt(
+        nonce,
+        dek,
+        context+active.to_bytes(4,"big")
+    )
+    return base64.b64encode(wrapped).decode(),base64.b64encode(nonce).decode(),active

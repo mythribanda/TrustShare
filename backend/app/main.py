@@ -593,7 +593,7 @@ def list_share_links(user:User=Depends(current_user),db:Session=Depends(get_db))
     for sh in shares:
         f=db.get(StoredFile,sh.file_id); policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
         expired=sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc)
-        output.append({'id':sh.id,'file_id':sh.file_id,'file_name':f.original_name if f else None,'expires_at':sh.expires_at.isoformat(),'revoked':sh.revoked,'expired':expired,'download_count':policy.download_count if policy else 0,'max_downloads':policy.max_downloads if policy else None,'permission':policy.permission if policy else 'download'})
+        output.append({'id':sh.id,'file_id':sh.file_id,'file_name':f.original_name if f else None,'expires_at':sh.expires_at.isoformat(),'revoked':sh.revoked,'expired':expired,'download_count':policy.download_count if policy else 0,'max_downloads':policy.max_downloads if policy else None,'permission':policy.permission if policy else 'download','password_protected':bool(policy and policy.password_hash)})
     return output
 
 def _public_share_response(token:str,password:Optional[str],db:Session,request:Request):

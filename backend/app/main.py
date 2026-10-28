@@ -13,7 +13,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import MongoClient
-from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select, update, delete, update, delete
+from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select, update, delete
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 logger = logging.getLogger("trustshare")
@@ -411,7 +411,8 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
         if db.scalar(select(StoredFile.id).where(StoredFile.owner_id==user.id,StoredFile.sha256==digest.hexdigest())): raise HTTPException(409,'You already uploaded an identical file')
         quota_bytes=int(os.getenv('USER_STORAGE_QUOTA_MB','100'))*1024*1024
         current_bytes=db.scalar(select(func.coalesce(func.sum(StoredFile.size),0)).where(StoredFile.owner_id==user.id)) or 0
-        if current_bytes+size>quota_bytes: raise HTTPException(413,'Your storage quota would be exceeded')
+        vault_bytes=db.scalar(select(func.coalesce(func.sum(VaultFile.size),0)).where(VaultFile.user_id==user.id)) or 0
+        if current_bytes+vault_bytes+size>quota_bytes: raise HTTPException(413,'Your storage quota would be exceeded')
         encrypted,wrapped_key,wrap_nonce,key_version=encrypt_bytes(plaintext,stored)
         with dest.open('wb') as out: out.write(encrypted)
         record=StoredFile(original_name=original,stored_name=stored,content_type=file.content_type or 'application/octet-stream',size=size,sha256=digest.hexdigest(),owner_id=user.id,folder_id=folder_id)

@@ -1,6 +1,7 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 SQLAlchemy==2.0.40
+alembic==1.15.2
 psycopg[binary]==3.2.6
 pydantic[email]==2.11.4
 pydantic-settings==2.9.1
@@ -9,3 +10,5 @@ python-jose[cryptography]==3.4.0
 bcrypt==4.3.0
 pymongo==4.12.0
 redis==5.2.1
+boto3==1.43.118
+moto==5.2.4

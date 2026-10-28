@@ -2,16 +2,17 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-trustshare}
-      POSTGRES_USER: ${POSTGRES_USER:-trustshare}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-local-password}
-    ports: ["5432:5432"]
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports: ["5433:5432"]
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trustshare} -d ${POSTGRES_DB:-trustshare}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 15
+
   mongo:
     image: mongo:7
     ports: ["27017:27017"]
@@ -21,6 +22,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 15
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -29,26 +31,78 @@ services:
       interval: 5s
       timeout: 3s
       retries: 15
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio_data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY};
+      /usr/bin/mc mb --ignore-existing myminio/${S3_BUCKET:-trustshare};
+      exit 0;
+      "
+
   backend:
     build: ./backend
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://trustshare:change-this-local-password@postgres:5432/trustshare}
-      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      MONGO_URL: ${MONGO_URL:?MONGO_URL is required}
+      MONGO_DB: ${MONGO_DB:-trustshare}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-trustshare}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      KEK_KEYS: ${KEK_KEYS:?KEK_KEYS is required}
+      KEK_CURRENT_VERSION: ${KEK_CURRENT_VERSION:-1}
     ports: ["8000:8000"]
     volumes: ["./storage:/app/storage"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').getcode() == 200 else 1)\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
     depends_on:
       postgres: {condition: service_healthy}
       mongo: {condition: service_healthy}
       redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+
   frontend:
     build: ./frontend
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     ports: ["5173:5173"]
-    depends_on: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5173/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    depends_on:
+      backend: {condition: service_healthy}
+
 volumes:
   postgres_data:
   mongo_data:
+  minio_data:

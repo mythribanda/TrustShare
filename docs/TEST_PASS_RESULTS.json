@@ -1,0 +1,353 @@
+[
+  {
+    "id": "TEST-A01",
+    "category": "Search & Folders",
+    "name": "Create folder with valid name",
+    "expected": "HTTP 201 with folder id & name",
+    "actual": "HTTP 201",
+    "status": "PASS",
+    "evidence": "Created folder ID 9"
+  },
+  {
+    "id": "TEST-A02",
+    "category": "Search & Folders",
+    "name": "Create folder with whitespace name",
+    "expected": "HTTP 422 or 400 rejection",
+    "actual": "HTTP 422",
+    "status": "PASS",
+    "evidence": "Response: {'detail': 'Folder name is required'}"
+  },
+  {
+    "id": "TEST-A03",
+    "category": "Search & Folders",
+    "name": "Create folder with duplicate name",
+    "expected": "HTTP 201 (non-unique allowed by schema) or 409",
+    "actual": "HTTP 201",
+    "status": "PASS",
+    "evidence": "Status: 201. Schema permits duplicate folder names per user. Assigned id: 10"
+  },
+  {
+    "id": "TEST-A04",
+    "category": "Search & Folders",
+    "name": "List user folders",
+    "expected": "HTTP 200 containing user's folders",
+    "actual": "HTTP 200, 2 folders",
+    "status": "PASS",
+    "evidence": "Returned folders: ['Financial_Reports', 'Financial_Reports']"
+  },
+  {
+    "id": "TEST-A05",
+    "category": "Search & Folders",
+    "name": "Exact filename search",
+    "expected": "HTTP 200 returning exactly the matched file",
+    "actual": "HTTP 200, count=1",
+    "status": "PASS",
+    "evidence": "Matched id: 14"
+  },
+  {
+    "id": "TEST-A06",
+    "category": "Search & Folders",
+    "name": "Partial filename search ('Quarterly')",
+    "expected": "HTTP 200 containing partial match",
+    "actual": "HTTP 200, count=1",
+    "status": "PASS",
+    "evidence": "Matches: ['Quarterly_Summary_2026.txt']"
+  },
+  {
+    "id": "TEST-A07",
+    "category": "Search & Folders",
+    "name": "Mixed-case search ('qUaRtErLy_SuMmArY')",
+    "expected": "HTTP 200 with case-insensitive ilike match",
+    "actual": "HTTP 200, count=1",
+    "status": "PASS",
+    "evidence": "Case-insensitivity verified via ilike query: True"
+  },
+  {
+    "id": "TEST-A08",
+    "category": "Search & Folders",
+    "name": "Nonexistent filename search",
+    "expected": "HTTP 200 with empty list",
+    "actual": "HTTP 200, count=0",
+    "status": "PASS",
+    "evidence": "Returned empty list as expected"
+  },
+  {
+    "id": "TEST-A09",
+    "category": "Search & Folders",
+    "name": "Clearing search parameter (no 'q')",
+    "expected": "HTTP 200 restoring all user files",
+    "actual": "HTTP 200, count=2",
+    "status": "PASS",
+    "evidence": "Total files listed: 2"
+  },
+  {
+    "id": "TEST-A10",
+    "category": "Search & Folders",
+    "name": "Search scope check (files only vs folders)",
+    "expected": "Search on /api/files covers file names only",
+    "actual": "Files matched: 0",
+    "status": "PASS",
+    "evidence": "Backend /api/files?q= filters StoredFile.original_name. Does not search folder names."
+  },
+  {
+    "id": "TEST-A11",
+    "category": "Search & Folders",
+    "name": "Filter files by folder_id",
+    "expected": "HTTP 200 returning only files in specified folder",
+    "actual": "HTTP 200, count=2",
+    "status": "PASS",
+    "evidence": "All returned files match folder_id 9"
+  },
+  {
+    "id": "TEST-A12",
+    "category": "Search & Folders",
+    "name": "Cross-user search isolation (User B searches User A file)",
+    "expected": "HTTP 200 with 0 results (User B cannot find User A file)",
+    "actual": "HTTP 200, count=0",
+    "status": "PASS",
+    "evidence": "User B search returned 0 items; isolation strictly enforced."
+  },
+  {
+    "id": "TEST-B01",
+    "category": "Upload Validation",
+    "name": "Upload valid small text file",
+    "expected": "HTTP 201 created",
+    "actual": "HTTP 201",
+    "status": "PASS",
+    "evidence": "Assigned file ID 16"
+  },
+  {
+    "id": "TEST-B02",
+    "category": "Upload Validation",
+    "name": "Upload zero-byte file",
+    "expected": "HTTP 400 'Empty files are not allowed'",
+    "actual": "HTTP 400",
+    "status": "PASS",
+    "evidence": "Detail: Empty files are not allowed"
+  },
+  {
+    "id": "TEST-B03",
+    "category": "Upload Validation",
+    "name": "Upload unsupported extension (.exe)",
+    "expected": "HTTP 415 'File type not allowed'",
+    "actual": "HTTP 415",
+    "status": "PASS",
+    "evidence": "Detail: File type not allowed"
+  },
+  {
+    "id": "TEST-B04",
+    "category": "Upload Validation",
+    "name": "Upload script extension (.sh)",
+    "expected": "HTTP 415 'File type not allowed'",
+    "actual": "HTTP 415",
+    "status": "PASS",
+    "evidence": "Detail: File type not allowed"
+  },
+  {
+    "id": "TEST-B05",
+    "category": "Upload Validation",
+    "name": "Upload file exactly at 10 MiB limit",
+    "expected": "HTTP 201 created (size <= limit)",
+    "actual": "HTTP 201",
+    "status": "PASS",
+    "evidence": "Uploaded size: 10485760"
+  },
+  {
+    "id": "TEST-B06",
+    "category": "Upload Validation",
+    "name": "Upload file exceeding 10 MiB limit",
+    "expected": "HTTP 413 'File exceeds 10 MiB limit'",
+    "actual": "HTTP 413",
+    "status": "PASS",
+    "evidence": "Detail: File exceeds 10 MiB limit"
+  },
+  {
+    "id": "TEST-B07",
+    "category": "Upload Validation",
+    "name": "Path traversal in filename ('../../etc/passwd.txt')",
+    "expected": "Sanitized to basename & assigned UUID filename on disk",
+    "actual": "HTTP 201, stored='3aecec3d53ea482ebcbbfe9ddae5676e.txt'",
+    "status": "PASS",
+    "evidence": "Server saved as UUID: 3aecec3d53ea482ebcbbfe9ddae5676e.txt. Original name stored as 'passwd.txt'. Traversal neutralized."
+  },
+  {
+    "id": "TEST-B08",
+    "category": "Upload Validation",
+    "name": "Spoofed content validation (plain text renamed to .pdf)",
+    "expected": "HTTP 400 header signature rejection",
+    "actual": "HTTP 400",
+    "status": "PASS",
+    "evidence": "Detail: Invalid file content: PDF file must start with '%PDF-' header signature."
+  },
+  {
+    "id": "TEST-B09",
+    "category": "Upload Validation",
+    "name": "Inconsistent Content-Type header vs extension",
+    "expected": "Server derives canonical MIME type from validated extension",
+    "actual": "HTTP 201, stored MIME: text/plain",
+    "status": "PASS",
+    "evidence": "Server derived MIME_MAP['.txt'] = 'text/plain', overriding misleading client header."
+  },
+  {
+    "id": "TEST-B10",
+    "category": "Upload Validation",
+    "name": "Orphaned files check after rejected upload",
+    "expected": "0 residual files on disk after 413 rejection",
+    "actual": "New files: 0",
+    "status": "PASS",
+    "evidence": "storage/ directory state preserved. Unlinked in try/except block."
+  },
+  {
+    "id": "TEST-C01",
+    "category": "Auth & Authz",
+    "name": "Protected endpoint without token",
+    "expected": "HTTP 401 'Authentication required'",
+    "actual": "HTTP 401",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Authentication required'}"
+  },
+  {
+    "id": "TEST-C02",
+    "category": "Auth & Authz",
+    "name": "Protected endpoint with malformed token",
+    "expected": "HTTP 401 'Invalid or expired token'",
+    "actual": "HTTP 401",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Invalid or expired token'}"
+  },
+  {
+    "id": "TEST-C03",
+    "category": "Auth & Authz",
+    "name": "Protected endpoint with tampered JWT signature",
+    "expected": "HTTP 401 'Invalid or expired token'",
+    "actual": "HTTP 401",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Invalid or expired token'}"
+  },
+  {
+    "id": "TEST-C04",
+    "category": "Auth & Authz",
+    "name": "Protected endpoint with expired JWT",
+    "expected": "HTTP 401 'Invalid or expired token'",
+    "actual": "HTTP 401",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Invalid or expired token'}"
+  },
+  {
+    "id": "TEST-C05",
+    "category": "Auth & Authz",
+    "name": "Login with incorrect password",
+    "expected": "HTTP 401 'Incorrect email or password'",
+    "actual": "HTTP 401",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Incorrect email or password'}"
+  },
+  {
+    "id": "TEST-C06",
+    "category": "Auth & Authz",
+    "name": "Cross-user file metadata inspection by ID guessing",
+    "expected": "HTTP 403 'Insufficient permissions to view file metadata'",
+    "actual": "HTTP 403",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Insufficient permissions to view file metadata'}"
+  },
+  {
+    "id": "TEST-C07",
+    "category": "Auth & Authz",
+    "name": "Cross-user file download by ID guessing",
+    "expected": "HTTP 403 'Insufficient permissions to download this file'",
+    "actual": "HTTP 403",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Insufficient permissions to download this file'}"
+  },
+  {
+    "id": "TEST-C08",
+    "category": "Auth & Authz",
+    "name": "Cross-user file deletion by ID guessing",
+    "expected": "HTTP 403 'Only the file owner can delete this file'",
+    "actual": "HTTP 403",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Only the file owner can delete this file'}"
+  },
+  {
+    "id": "TEST-C09",
+    "category": "Auth & Authz",
+    "name": "Regular user calls admin route (/api/admin/users)",
+    "expected": "HTTP 403 'Insufficient permissions'",
+    "actual": "HTTP 403",
+    "status": "PASS",
+    "evidence": "Detail: {'detail': 'Insufficient permissions'}"
+  },
+  {
+    "id": "TEST-C10",
+    "category": "Auth & Authz",
+    "name": "Admin calls admin route (/api/admin/users)",
+    "expected": "HTTP 200 with list of users",
+    "actual": "HTTP 200, user count=6",
+    "status": "PASS",
+    "evidence": "Successfully listed users as admin"
+  },
+  {
+    "id": "TEST-D01",
+    "category": "File Integrity & Lifecycle",
+    "name": "Independent SHA-256 digest comparison",
+    "expected": "Client digest == API digest == PostgreSQL digest == MongoDB digest",
+    "actual": "Match: True",
+    "status": "PASS",
+    "evidence": "Digest: 9a4c7715e8acbf405fc138f1009b4a75b5d9299c8e0002b283e7bc6d7f139fc8"
+  },
+  {
+    "id": "TEST-D02",
+    "category": "File Integrity & Lifecycle",
+    "name": "Download byte-for-byte exact match",
+    "expected": "HTTP 200 with 100% byte match against original payload",
+    "actual": "HTTP 200, size=73",
+    "status": "PASS",
+    "evidence": "Payload verified identical (73 bytes)"
+  },
+  {
+    "id": "TEST-D03",
+    "category": "File Integrity & Lifecycle",
+    "name": "Cascading file deletion (SQL, Mongo, Disk)",
+    "expected": "SQL count=0, Mongo count=0, Disk exists=False",
+    "actual": "HTTP 200, SQL=0, Mongo=0, Disk=False",
+    "status": "PASS",
+    "evidence": "Deleted file 20. Zero residual state in any database or disk."
+  },
+  {
+    "id": "TEST-E01",
+    "category": "Database Consistency",
+    "name": "PostgreSQL relational integrity (Foreign Keys)",
+    "expected": "Foreign key 'files_owner_id_fkey' active in PostgreSQL",
+    "actual": "FK exists: True",
+    "status": "PASS",
+    "evidence": "PostgreSQL confirmed authoritative for relational constraints."
+  },
+  {
+    "id": "TEST-E02",
+    "category": "Database Consistency",
+    "name": "MongoDB document metadata synchronization",
+    "expected": "source: 'mongodb', synced: true",
+    "actual": "HTTP 200, source=mongodb",
+    "status": "PASS",
+    "evidence": "Metadata payload retrieved from MongoDB: True"
+  },
+  {
+    "id": "TEST-E03",
+    "category": "Database Consistency",
+    "name": "Redis stateful session revocation on logout",
+    "expected": "Key exists before logout -> deleted on logout -> HTTP 401 on reuse",
+    "actual": "Before=True, After=False, AuthMe=401",
+    "status": "PASS",
+    "evidence": "Redis session key session:19:b989c7fe4eaff5e8 revoked immediately. Token reuse blocked."
+  },
+  {
+    "id": "TEST-E04",
+    "category": "Database Consistency",
+    "name": "Admin metadata reconciliation (/api/admin/reconcile-metadata)",
+    "expected": "HTTP 200 with scanned/fixed/failed report",
+    "actual": "HTTP 200, scanned=8",
+    "status": "PASS",
+    "evidence": "Reconcile output: {'message': 'Reconciliation complete: 0 fixed, 0 failed out of 8 records.', 'scanned': 8, 'fixed': 0, 'failed': 0}"
+  }
+]

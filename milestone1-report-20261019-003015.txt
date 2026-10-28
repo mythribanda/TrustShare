@@ -1,0 +1,263 @@
+**********************
+PowerShell transcript start
+Start time: 20261019003015
+Username: MICKEY\Mythri Banda
+RunAs User: MICKEY\Mythri Banda
+Configuration Name: 
+Machine: MICKEY (Microsoft Windows NT 10.0.26300.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -WorkingDirectory ~
+Process ID: 26844
+PSVersion: 7.6.6
+PSEdition: Core
+GitCommitId: 7.6.6
+OS: Microsoft Windows 10.0.26300
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript started, output file is C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1\milestone1-report-20261019-003015.txt
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 1. Git status ---" -ForegroundColor Yellow
+
+--- 1. Git status ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> git status --short --branch
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> git remote -v
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 2. Required project files ---" -ForegroundColor Yellow
+
+--- 2. Required project files ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> $Required = @(
+    ".env.example",
+    "docker-compose.yml",
+    "backend\Dockerfile",
+    "backend\app\main.py",
+    "backend\requirements.txt",
+    "frontend\Dockerfile",
+    "frontend\package.json",
+    "frontend\src\App.jsx",
+    "docs\ARCHITECTURE.md",
+    "docs\TEST_PLAN.md"
+)
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> foreach ($File in $Required) {
+    if (Test-Path $File) {
+        Write-Host "FOUND  $File" -ForegroundColor Green
+    } else {
+        Write-Host "MISSING $File" -ForegroundColor Red
+    }
+}
+FOUND  .env.example
+FOUND  docker-compose.yml
+FOUND  backend\Dockerfile
+FOUND  backend\app\main.py
+FOUND  backend\requirements.txt
+FOUND  frontend\Dockerfile
+FOUND  frontend\package.json
+FOUND  frontend\src\App.jsx
+FOUND  docs\ARCHITECTURE.md
+FOUND  docs\TEST_PLAN.md
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 3. Environment configuration ---" -ForegroundColor Yellow
+
+--- 3. Environment configuration ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
+    Copy-Item ".env.example" ".env"
+    $Secret = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+    $EnvText = Get-Content ".env" -Raw
+    $EnvText = $EnvText -replace '(?m)^JWT_SECRET=.*$', "JWT_SECRET=$Secret"
+    Set-Content ".env" $EnvText -Encoding ascii
+    Write-Host "Created a local .env with a generated JWT secret. Review database credentials if you changed them previously."
+} elseif (Test-Path ".env") {
+    Write-Host "Existing .env preserved."
+} else {
+    Write-Host ".env.example missing; cannot configure environment automatically." -ForegroundColor Red
+}
+Existing .env preserved.
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 4. Docker Compose configuration check ---" -ForegroundColor Yellow
+
+--- 4. Docker Compose configuration check ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> docker compose config --quiet
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if ($LASTEXITCODE -eq 0) {
+    Write-Host "Compose configuration valid." -ForegroundColor Green
+} else {
+    Write-Host "Compose configuration has errors. See output above." -ForegroundColor Red
+}
+Compose configuration valid.
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 5. Build and start services ---" -ForegroundColor Yellow
+
+--- 5. Build and start services ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> docker compose up --build -d
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if ($LASTEXITCODE -ne 0) {
+    Write-Host "Startup failed. Continuing with diagnostics; do not delete volumes." -ForegroundColor Red
+}
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 6. Service status ---" -ForegroundColor Yellow
+
+--- 6. Service status ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> docker compose ps -a
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 7. API health check ---" -ForegroundColor Yellow
+
+--- 7. API health check ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> $Health = $null
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> for ($i = 0; $i -lt 12; $i++) {
+    try {
+        $Health = Invoke-RestMethod "http://localhost:8000/health" -TimeoutSec 5
+        break
+    } catch {
+        Start-Sleep -Seconds 3
+    }
+}
+>> TerminatingError(Invoke-RestMethod): "The response ended prematurely. (ResponseEnded)"
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> TerminatingError(Invoke-RestMethod): "The response ended prematurely. (ResponseEnded)"
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if ($Health) {
+    $Health | ConvertTo-Json -Depth 5
+    if ($Health.postgres -ne "connected") {
+        Write-Host "FAIL: API is not using PostgreSQL." -ForegroundColor Red
+    }
+    if ($Health.mongodb -ne "connected") {
+        Write-Host "FAIL: MongoDB is unavailable to the API." -ForegroundColor Red
+    }
+    if ($Health.redis -ne "connected") {
+        Write-Host "FAIL: Redis is unavailable to the API." -ForegroundColor Red
+    }
+} else {
+    Write-Host "API did not respond at http://localhost:8000/health." -ForegroundColor Red
+}
+{
+  "status": "ok"
+}
+FAIL: API is not using PostgreSQL.
+FAIL: MongoDB is unavailable to the API.
+FAIL: Redis is unavailable to the API.
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 8. Frontend response ---" -ForegroundColor Yellow
+
+--- 8. Frontend response ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> try {
+    $Front = Invoke-WebRequest "http://localhost:5173" -TimeoutSec 10
+    Write-Host "Frontend HTTP status: $($Front.StatusCode)"
+} catch {
+    Write-Host "Frontend did not respond: $($_.Exception.Message)" -ForegroundColor Red
+}
+Frontend HTTP status: 200
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 9. Frontend production build check ---" -ForegroundColor Yellow
+
+--- 9. Frontend production build check ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if (Test-Path "frontend\package-lock.json") {
+    Push-Location frontend
+    npm ci
+    if ($LASTEXITCODE -eq 0) {
+        npm run build
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Frontend build passed." -ForegroundColor Green
+        } else {
+            Write-Host "Frontend build failed." -ForegroundColor Red
+        }
+    } else {
+        Write-Host "npm ci failed; inspect the errors above." -ForegroundColor Red
+    }
+    Pop-Location
+} else {
+    Write-Host "package-lock.json missing; skipping reproducible frontend build." -ForegroundColor Red
+}
+>> }
+{
+  "status": "ok"
+}
+FAIL: API is not using PostgreSQL.
+FAIL: MongoDB is unavailable to the API.
+FAIL: Redis is unavailable to the API.
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1>
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 8. Frontend response ---" -ForegroundColor Yellow
+
+--- 8. Frontend response ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> try {
+>>     $Front = Invoke-WebRequest "http://localhost:5173" -TimeoutSec 10
+>>     Write-Host "Frontend HTTP status: $($Front.StatusCode)"
+>> } catch {
+>>     Write-Host "Frontend did not respond: $($_.Exception.Message)" -ForegroundColor Red
+>> }
+Frontend HTTP status: 200
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1>
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 9. Frontend production build check ---" -ForegroundColor Yellow
+
+--- 9. Frontend production build check ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> if (Test-Path "frontend\package-lock.json") {
+>>     Push-Location frontend
+>>     npm ci
+>>     if ($LASTEXITCODE -eq 0) {
+>>         npm run build
+>>         if ($LASTEXITCODE -eq 0) {
+>>             Write-Host "Frontend build passed." -ForegroundColor Green
+>>         } else {
+>>             Write-Host "Frontend build failed." -ForegroundColor Red
+>>         }
+>>     } else {
+>>         Write-Host "npm ci failed; inspect the errors above." -ForegroundColor Red
+>>     }
+>>     Pop-Location
+>> } else {
+>>     Write-Host "package-lock.json missing; skipping reproducible frontend build." -ForegroundColor Red
+>> }
+
+added 154 packages, and audited 155 packages in 28s
+
+30 packages are looking for funding
+  run `npm fund` for details
+
+7 vulnerabilities (2 moderate, 5 high)
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn install-scripts   esbuild@0.25.12 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+
+Frontend build passed.
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 10. Backend and service logs ---" -ForegroundColor Yellow
+
+--- 10. Backend and service logs ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> docker compose logs --tail=100 backend frontend postgres mongo redis
+
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Write-Host "`n--- 11. Milestone 1 API endpoints ---" -ForegroundColor Yellow
+
+--- 11. Milestone 1 API endpoints ---
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> try {
+    $OpenApi = Invoke-RestMethod "http://localhost:8000/openapi.json" -TimeoutSec 10
+    $ExpectedPaths = @(
+        "/health",
+        "/api/auth/register",
+        "/api/auth/login",
+        "/api/auth/me",
+        "/api/files",
+        "/api/files/upload",
+        "/api/folders",
+        "/api/admin/users"
+    )
+    foreach ($Path in $ExpectedPaths) {
+        if ($OpenApi.paths.PSObject.Properties.Name -contains $Path) {
+            Write-Host "FOUND  $Path" -ForegroundColor Green
+        } else {
+            Write-Host "MISSING $Path" -ForegroundColor Red
+        }
+    }
+} catch {
+    Write-Host "Could not read the API schema." -ForegroundColor Red
+}
+FOUND  /health
+FOUND  /api/auth/register
+FOUND  /api/auth/login
+FOUND  /api/auth/me
+FOUND  /api/files
+FOUND  /api/files/upload
+FOUND  /api/folders
+FOUND  /api/admin/users
+PS C:\Users\Mythri Banda\Desktop\github projects\trustshare-milestone1> Stop-Transcript
+**********************
+PowerShell transcript end
+End time: 20261019003120
+**********************

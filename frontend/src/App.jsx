@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import axios from 'axios';
 import {
   ShieldCheck,
@@ -43,6 +43,8 @@ function sizeText(n) {
 }
 
 function App() {
+  // Milestone 1 Note: Auth token is stored in localStorage for local development simplicity.
+  // Production roadmap plans to migrate token management to HttpOnly, Secure, SameSite cookies.
   const [token, setToken] = useState(localStorage.getItem('trustshare_token') || '');
   const [user, setUser] = useState(null);
   const [view, setView] = useState('landing'); // 'landing' | 'auth' | 'dashboard'
@@ -61,6 +63,7 @@ function App() {
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [folderNameInput, setFolderNameInput] = useState('');
   const [folderModalError, setFolderModalError] = useState('');
+  const [isSubmittingFolder, setIsSubmittingFolder] = useState(false);
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFileObj, setUploadFileObj] = useState(null);
@@ -73,6 +76,7 @@ function App() {
   const [detailsFile, setDetailsFile] = useState(null);
   const [fileMetadata, setFileMetadata] = useState(null);
   const [loadingMetadata, setLoadingMetadata] = useState(false);
+  const metadataAbortControllerRef = useRef(null);
 
   useEffect(() => {
     if (token) {
@@ -83,9 +87,11 @@ function App() {
 
   useEffect(() => {
     api
-      .get('/health')
+      .get('/health/ready')
       .then((r) => setHealth(r.data))
-      .catch(() => {});
+      .catch((err) => {
+        if (err.response?.data) setHealth(err.response.data);
+      });
   }, []);
 
   async function loadMe() {
@@ -123,22 +129,25 @@ function App() {
     }
   }, [query, activeFolder]);
 
-  // ITEM 1 & 2: Logout with backend notification and state clearing
+  // ITEM 4: Logout: always clear local state, but if request fails show small notice
   async function logout() {
+    let logoutNotice = '';
     try {
       if (token) {
         await api.post('/api/auth/logout');
       }
     } catch (err) {
       console.warn('Backend logout notification error:', err);
+      logoutNotice = 'Signed out locally; server session may remain active until it expires';
     } finally {
+      // Milestone 1 Note: Clear auth token from localStorage (planned transition to HttpOnly cookies for Milestone 2)
       localStorage.removeItem('trustshare_token');
       delete api.defaults.headers.common.Authorization;
       setToken('');
       setUser(null);
       setFiles([]);
       setFolders([]);
-      setNotice('');
+      setNotice(logoutNotice);
       setView('landing');
     }
   }
@@ -151,6 +160,7 @@ function App() {
     try {
       const path = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const r = await api.post(path, form);
+      // Milestone 1 Note: Store auth token in localStorage (planned transition to HttpOnly cookies for Milestone 2)
       localStorage.setItem('trustshare_token', r.data.access_token);
       api.defaults.headers.common.Authorization = `Bearer ${r.data.access_token}`;
       setToken(r.data.access_token);
@@ -222,13 +232,19 @@ function App() {
       await api.post('/api/files/upload', data, {
         onUploadProgress: (p) => {
           const percent = Math.round((p.loaded / (p.total || p.loaded)) * 100);
-          setUploadProgress(percent);
+          // ITEM 1: Cap progress bar at 95% until API responds successfully
+          setUploadProgress(Math.min(95, percent));
         }
       });
+      // API responded successfully: show 100% and Done
+      setUploadProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 400));
       setNotice(`File "${uploadFileObj.name}" uploaded successfully.`);
       setIsUploadModalOpen(false);
       await loadFiles();
     } catch (e) {
+      // On error, reset the progress bar and show server error message
+      setUploadProgress(0);
       if (e.response?.status === 429) {
         setUploadModalError(e.response.data?.detail || 'Rate limit exceeded: You have reached the maximum of 20 uploads per minute.');
       } else {
@@ -239,20 +255,24 @@ function App() {
     }
   }
 
-  // ITEM 6: Folder Modal
+  // ITEM 2: Folder Modal with isSubmittingFolder guard
   function openFolderModal() {
     setFolderNameInput('');
     setFolderModalError('');
+    setIsSubmittingFolder(false);
     setIsFolderModalOpen(true);
   }
 
   async function handleFolderSubmit(e) {
     e.preventDefault();
+    if (isSubmittingFolder) return;
     const name = folderNameInput.trim();
     if (!name) {
       setFolderModalError('Folder name is required.');
       return;
     }
+    setIsSubmittingFolder(true);
+    setFolderModalError('');
     try {
       await api.post('/api/folders', { name });
       setNotice(`Folder "${name}" created.`);
@@ -260,22 +280,46 @@ function App() {
       await loadFolders();
     } catch (e) {
       setFolderModalError(e.response?.data?.detail || 'Could not create folder.');
+    } finally {
+      setIsSubmittingFolder(false);
     }
   }
 
-  // ITEM 4: MongoDB Metadata Modal
-  async function openFileDetails(f) {
-    setDetailsFile(f);
+  // ITEM 3: Metadata Modal with AbortController and clearing old data
+  function closeFileDetails() {
+    if (metadataAbortControllerRef.current) {
+      metadataAbortControllerRef.current.abort();
+    }
+    setDetailsFile(null);
     setFileMetadata(null);
+    setLoadingMetadata(false);
+  }
+
+  async function openFileDetails(f) {
+    if (metadataAbortControllerRef.current) {
+      metadataAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    metadataAbortControllerRef.current = controller;
+
+    setDetailsFile(f);
+    setFileMetadata(null); // Clear old data when modal opens
     setLoadingMetadata(true);
     try {
-      const r = await api.get(`/api/files/${f.id}/metadata`);
-      setFileMetadata(r.data);
+      const r = await api.get(`/api/files/${f.id}/metadata`, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        setFileMetadata(r.data);
+      }
     } catch (e) {
+      if (axios.isCancel(e) || e.name === 'CanceledError' || controller.signal.aborted) {
+        return; // Superseded by newer request
+      }
       setError(e.response?.data?.detail || 'Could not fetch file metadata');
       setDetailsFile(null);
     } finally {
-      setLoadingMetadata(false);
+      if (!controller.signal.aborted) {
+        setLoadingMetadata(false);
+      }
     }
   }
 
@@ -309,27 +353,36 @@ function App() {
   // VIEW 1: LANDING PAGE
   if (view === 'landing') {
     return (
-      <LandingPage
-        health={health}
-        onGetStarted={() => {
-          if (user) {
-            setView('dashboard');
-          } else {
-            setMode('register');
-            setView('auth');
-            setError('');
-          }
-        }}
-        onSignIn={() => {
-          if (user) {
-            setView('dashboard');
-          } else {
-            setMode('login');
-            setView('auth');
-            setError('');
-          }
-        }}
-      />
+      <>
+        {notice && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-lg flex items-center gap-3">
+            <span>{notice}</span>
+            <button onClick={() => setNotice('')} className="font-bold text-sm leading-none hover:opacity-80">×</button>
+          </div>
+        )}
+        <LandingPage
+          user={user}
+          health={health}
+          onGetStarted={() => {
+            if (user) {
+              setView('dashboard');
+            } else {
+              setMode('register');
+              setView('auth');
+              setError('');
+            }
+          }}
+          onSignIn={() => {
+            if (user) {
+              setView('dashboard');
+            } else {
+              setMode('login');
+              setView('auth');
+              setError('');
+            }
+          }}
+        />
+      </>
     );
   }
 
@@ -393,6 +446,16 @@ function App() {
                 ? 'Sign in to continue to your secure workspace.'
                 : 'Set up an account to keep your files organized.'}
             </p>
+
+            {notice && (
+              <div className="alert info text-xs flex items-center justify-between bg-amber-50 text-amber-900 border border-amber-200 p-2.5 rounded-lg mb-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                  <span>{notice}</span>
+                </div>
+                <button onClick={() => setNotice('')} className="text-amber-800 font-bold ml-2">×</button>
+              </div>
+            )}
 
             {error && (
               <div className="alert error">
@@ -789,7 +852,7 @@ function App() {
                 </div>
                 <div>
                   <h3 className="font-['Manrope'] font-bold text-slate-800 text-base m-0">Upload Document</h3>
-                  <p className="text-xs text-slate-400 m-0">Max 10 MiB • Encrypted verification</p>
+                  <p className="text-xs text-slate-400 m-0">Max 10 MiB • SHA-256 integrity verification</p>
                 </div>
               </div>
               <button
@@ -892,12 +955,18 @@ function App() {
               {uploading && (
                 <div className="flex flex-col gap-1.5 pt-1">
                   <div className="flex justify-between text-xs text-slate-600">
-                    <span>Uploading file...</span>
-                    <span className="font-semibold text-indigo-600">{uploadProgress}%</span>
+                    <span className="font-medium text-slate-700">
+                      {uploadProgress === 100 ? 'Done' : 'Uploading file...'}
+                    </span>
+                    <span className={`font-semibold ${uploadProgress === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>
+                      {uploadProgress}%
+                    </span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                     <div
-                      className="bg-indigo-600 h-2.5 rounded-full transition-all duration-200"
+                      className={`h-2.5 rounded-full transition-all duration-200 ${
+                        uploadProgress === 100 ? 'bg-emerald-600' : 'bg-indigo-600'
+                      }`}
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </div>
@@ -960,27 +1029,30 @@ function App() {
                   type="text"
                   required
                   autoFocus
+                  disabled={isSubmittingFolder}
                   maxLength={120}
                   placeholder="e.g., Contracts, Financials, Audits"
                   value={folderNameInput}
                   onChange={(e) => setFolderNameInput(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:border-indigo-500"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-slate-50 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
                 />
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isSubmittingFolder}
                   onClick={() => setIsFolderModalOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30"
+                  disabled={isSubmittingFolder || !folderNameInput.trim()}
+                  className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Create Folder
+                  {isSubmittingFolder ? 'Creating...' : 'Create Folder'}
                 </button>
               </div>
             </form>
@@ -1002,12 +1074,12 @@ function App() {
                     File Metadata Details
                   </h3>
                   <span className="text-[11px] text-slate-400">
-                    Stored Metadata Record & Cryptographic Signature
+                    Stored Metadata Record & SHA-256 Digest (content integrity hash)
                   </span>
                 </div>
               </div>
               <button
-                onClick={() => setDetailsFile(null)}
+                onClick={closeFileDetails}
                 className="text-slate-400 hover:text-slate-600 p-1"
               >
                 <X size={18} />
@@ -1021,15 +1093,16 @@ function App() {
             ) : fileMetadata ? (
               <div className="flex flex-col gap-3 text-xs">
                 <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-slate-500 font-medium">Metadata Store Source:</span>
+                  <span className="text-slate-500 font-medium">Metadata Sync Status:</span>
                   <span
-                    className={`font-semibold px-2 py-0.5 rounded text-[11px] ${
-                      fileMetadata.source === 'mongodb'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-indigo-100 text-indigo-800'
+                    className={`font-semibold px-2.5 py-1 rounded-full text-[11px] flex items-center gap-1.5 ${
+                      fileMetadata.synced
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        : 'bg-amber-100 text-amber-800 border border-amber-200'
                     }`}
                   >
-                    {fileMetadata.source === 'mongodb' ? 'MongoDB (Document Store)' : 'Relational PostgreSQL Index'}
+                    <span className={`w-1.5 h-1.5 rounded-full ${fileMetadata.synced ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    {fileMetadata.synced ? 'Synced with MongoDB' : 'Using PostgreSQL fallback'}
                   </span>
                 </div>
 
@@ -1082,7 +1155,7 @@ function App() {
 
             <div className="flex justify-end pt-2 border-t border-slate-100">
               <button
-                onClick={() => setDetailsFile(null)}
+                onClick={closeFileDetails}
                 className="px-5 py-2 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200"
               >
                 Close

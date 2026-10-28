@@ -398,7 +398,7 @@ def login(data:LoginIn,request:Request,db:Session=Depends(get_db)):
 def me(user:User=Depends(current_user)): return {'user':user_dict(user)}
 
 @app.post('/api/auth/logout')
-def logout(creds: HTTPAuthorizationCredentials=Depends(bearer), user:User=Depends(current_user)):
+def logout(creds: HTTPAuthorizationCredentials=Depends(bearer), user:User=Depends(current_user),db:Session=Depends(get_db)):
     if cache and creds:
         try:
             token_hash = hashlib.sha256(creds.credentials.encode()).hexdigest()[:16]
@@ -511,6 +511,8 @@ def download_file(file_id:int,request:Request,user:User=Depends(current_user),db
         if not key_record:
             raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
         plaintext=decrypt_bytes(get_bytes(record.stored_name,STORAGE),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
+    except HTTPException:
+        raise
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id})
         raise HTTPException(500,'Could not decrypt stored file')
@@ -585,6 +587,8 @@ def public_share(token:str,db:Session=Depends(get_db)):
         if not key: raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
         blob=get_bytes(f.stored_name,STORAGE)
         content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version)
+    except HTTPException:
+        raise
     except Exception:
         log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id}); raise HTTPException(500,'Unable to decrypt file')
     if policy:
@@ -639,6 +643,8 @@ def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(
     if not key: raise HTTPException(409,'This legacy file is not encrypted yet. Run the encryption migration first.')
     try:
         blob=get_bytes(f.stored_name,STORAGE); content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version)
+    except HTTPException:
+        raise
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id}); raise HTTPException(500,'Could not preview file')
     return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'inline; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})

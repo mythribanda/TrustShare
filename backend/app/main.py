@@ -578,7 +578,10 @@ def public_share(token:str,db:Session=Depends(get_db)):
     now=datetime.now(timezone.utc)
     if not sh or sh.revoked or sh.expires_at.replace(tzinfo=timezone.utc)<now: raise HTTPException(404,'Share expired, revoked, or invalid')
     policy=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
-    if policy and policy.max_downloads is not None and policy.download_count>=policy.max_downloads: raise HTTPException(410,'Share download limit reached')
+    if policy and policy.permission!='view': 
+        if policy.max_downloads is not None and policy.download_count>=policy.max_downloads: raise HTTPException(410,'Share download limit reached')
+    if policy and policy.permission=='download' and policy.max_downloads is not None and policy.download_count>=policy.max_downloads:
+        raise HTTPException(410,'Share download limit reached')
     f=db.get(StoredFile,sh.file_id)
     if not f: raise HTTPException(404,'File not found')
     if not object_exists(f.stored_name,STORAGE): raise HTTPException(404,'Stored file is missing')
@@ -590,15 +593,17 @@ def public_share(token:str,db:Session=Depends(get_db)):
     except HTTPException:
         raise
     except Exception:
-        log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id}); raise HTTPException(500,'Unable to decrypt file')
-    if policy:
+        log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id})
+        raise HTTPException(500,'Unable to decrypt file')
+    if policy and policy.permission=='download':
         query=update(SharePolicy).where(SharePolicy.id==policy.id)
         if policy.max_downloads is not None: query=query.where(SharePolicy.download_count<policy.max_downloads)
         result=db.execute(query.values(download_count=SharePolicy.download_count+1)); db.commit()
         if result.rowcount!=1: raise HTTPException(410,'Share download limit reached')
-    log_event('shared_file_downloaded',None,{'file_id':f.id,'share_id':sh.id})
+    log_event('shared_file_accessed',None,{'file_id':f.id,'share_id':sh.id,'permission':policy.permission if policy else 'download'})
     mode='inline' if policy and policy.permission=='view' else 'attachment'
-    return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'{mode}; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})
+    disposition_name=Path(f.original_name).name.replace('\\r','').replace('\\n','').replace('"','')
+    return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'{mode}; filename="{disposition_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
 
 @app.post('/api/shares/{share_id}/revoke')
 def revoke_share(share_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):

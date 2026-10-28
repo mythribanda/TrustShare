@@ -6,6 +6,7 @@ from typing import Optional
 import bcrypt
 import redis
 from app.security_crypto import encrypt_bytes, decrypt_bytes
+from app.storage_backend import put_bytes, get_bytes, object_exists, delete_object, health as storage_health
 from jose import jwt, JWTError
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, status, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -300,7 +301,7 @@ def health():
         'postgres':'connected' if db_backend=='postgres' else 'fallback_sqlite',
         'mongodb':'connected' if mongo_available else 'unavailable',
         'redis':'connected' if cache else 'unavailable',
-        'storage':'writable' if STORAGE.exists() and os.access(STORAGE,os.W_OK) else 'unavailable'
+        'storage':storage_health(STORAGE)
     }
 
 @app.post('/api/auth/register',status_code=201)
@@ -414,7 +415,7 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
         vault_bytes=db.scalar(select(func.coalesce(func.sum(VaultFile.size),0)).where(VaultFile.user_id==user.id)) or 0
         if current_bytes+vault_bytes+size>quota_bytes: raise HTTPException(413,'Your storage quota would be exceeded')
         encrypted,wrapped_key,wrap_nonce,key_version=encrypt_bytes(plaintext,stored)
-        with dest.open('wb') as out: out.write(encrypted)
+        put_bytes(stored,encrypted,STORAGE)
         record=StoredFile(original_name=original,stored_name=stored,content_type=file.content_type or 'application/octet-stream',size=size,sha256=digest.hexdigest(),owner_id=user.id,folder_id=folder_id)
         db.add(record); db.flush()
         db.add(FileKey(file_id=record.id,wrapped_key=wrapped_key,wrap_nonce=wrap_nonce,key_version=key_version))
@@ -428,7 +429,7 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
         log_event('file_uploaded',user.id,{'file_id':record.id,'name':original,'size':size})
         return file_dict(record)
     except Exception:
-        if dest.exists(): dest.unlink()
+        delete_object(stored,STORAGE)
         db.rollback(); raise
     finally: file.file.close()
 
@@ -438,14 +439,13 @@ def download_file(file_id:int,request:Request,user:User=Depends(current_user),db
     grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id))
     if not record or (record.owner_id!=user.id and grant is None): raise HTTPException(404,'File not found')
     if grant and grant.permission=='view': raise HTTPException(403,'Download is disabled for this shared file')
-    path=STORAGE/record.stored_name
-    if not path.is_file(): raise HTTPException(404,'Stored file is missing')
+    if not object_exists(record.stored_name,STORAGE): raise HTTPException(404,'Stored file is missing')
     key_record=db.scalar(select(FileKey).where(FileKey.file_id==record.id))
     try:
         if key_record:
-            plaintext=decrypt_bytes(path.read_bytes(),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
+            plaintext=decrypt_bytes(get_bytes(record.stored_name,STORAGE),record.stored_name,key_record.wrapped_key,key_record.wrap_nonce,key_record.key_version)
         else:
-            plaintext=path.read_bytes()
+            plaintext=get_bytes(record.stored_name,STORAGE)
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id})
         raise HTTPException(500,'Could not decrypt stored file')
@@ -456,8 +456,7 @@ def download_file(file_id:int,request:Request,user:User=Depends(current_user),db
 def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
     record=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
     if not record: raise HTTPException(404,'File not found')
-    path=STORAGE/record.stored_name
-    if path.exists(): path.unlink()
+    delete_object(record.stored_name,STORAGE)
     share_ids=list(db.scalars(select(FileShare.id).where(FileShare.file_id==file_id)).all())
     if share_ids: db.execute(delete(SharePolicy).where(SharePolicy.share_id.in_(share_ids)))
     db.execute(delete(FileShare).where(FileShare.file_id==file_id))
@@ -515,10 +514,9 @@ def public_share(token:str,db:Session=Depends(get_db)):
     if policy and policy.max_downloads is not None and policy.download_count>=policy.max_downloads: raise HTTPException(410,'Share download limit reached')
     f=db.get(StoredFile,sh.file_id)
     if not f: raise HTTPException(404,'File not found')
-    path=STORAGE/f.stored_name
-    if not path.is_file(): raise HTTPException(404,'Stored file is missing')
+    if not object_exists(f.stored_name,STORAGE): raise HTTPException(404,'Stored file is missing')
     try:
-        key=db.scalar(select(FileKey).where(FileKey.file_id==f.id)); blob=path.read_bytes()
+        key=db.scalar(select(FileKey).where(FileKey.file_id==f.id)); blob=get_bytes(f.stored_name,STORAGE)
         content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version) if key else blob
     except Exception:
         log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id}); raise HTTPException(500,'Unable to decrypt file')
@@ -570,9 +568,9 @@ def revoke_direct_share(grant_id:int,user:User=Depends(current_user),db:Session=
 def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
     f=db.get(StoredFile,file_id); grant=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==user.id))
     if not f or (f.owner_id!=user.id and grant is None): raise HTTPException(404,'File not found')
-    path=STORAGE/f.stored_name; key=db.scalar(select(FileKey).where(FileKey.file_id==file_id))
+    key=db.scalar(select(FileKey).where(FileKey.file_id==file_id))
     try:
-        blob=path.read_bytes(); content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version) if key else blob
+        blob=get_bytes(f.stored_name,STORAGE); content=decrypt_bytes(blob,f.stored_name,key.wrapped_key,key.wrap_nonce,key.key_version) if key else blob
     except Exception:
         log_event('file_decryption_failed',user.id,{'file_id':file_id}); raise HTTPException(500,'Could not preview file')
     return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'inline; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})
@@ -700,11 +698,11 @@ def vault_upload(file:UploadFile=File(...),x_vault_password:str=Header(...),user
         if regular+secure+len(content)>quota: raise HTTPException(413,'Your storage quota would be exceeded')
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         stored='vault-'+uuid.uuid4().hex+'.enc'; nonce=secrets.token_bytes(12); encrypted=AESGCM(key).encrypt(nonce,content,f'trustshare:vault-file:{user.id}:{stored}'.encode())
-        sealed=_vault_seal_name(key,user.id,stored,name); dest=STORAGE/stored; dest.write_bytes(encrypted)
+        sealed=_vault_seal_name(key,user.id,stored,name); dest=STORAGE/stored; put_bytes(stored,encrypted,STORAGE)
         row=VaultFile(user_id=user.id,stored_name=stored,sealed_name=sealed,nonce=base64.b64encode(nonce).decode(),content_type=file.content_type or 'application/octet-stream',size=len(content))
         db.add(row); db.commit(); db.refresh(row)
     except Exception:
-        if dest is not None and dest.exists(): dest.unlink()
+        if dest is not None: delete_object(dest.name,STORAGE)
         db.rollback(); raise
     finally: file.file.close()
     log_event('vault_file_uploaded',user.id,{'vault_file_id':row.id,'size':len(content)})
@@ -716,7 +714,7 @@ def vault_download(vault_file_id:int,x_vault_password:str=Header(...),user:User=
     if not row: raise HTTPException(404,'Vault file not found')
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     try:
-        content=AESGCM(key).decrypt(base64.b64decode(row.nonce),(STORAGE/row.stored_name).read_bytes(),f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode()); name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+        content=AESGCM(key).decrypt(base64.b64decode(row.nonce),get_bytes(row.stored_name,STORAGE),f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode()); name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
     except Exception:
         log_event('vault_decryption_failed',user.id,{'vault_file_id':vault_file_id,'severity':'high'}); raise HTTPException(500,'Vault file could not be decrypted')
     log_event('vault_file_downloaded',user.id,{'vault_file_id':vault_file_id})
@@ -726,8 +724,7 @@ def vault_download(vault_file_id:int,x_vault_password:str=Header(...),user:User=
 def vault_delete(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
     _vault_key(user,x_vault_password,db); row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
     if not row: raise HTTPException(404,'Vault file not found')
-    path=STORAGE/row.stored_name
-    if path.exists(): path.unlink()
+    delete_object(row.stored_name,STORAGE)
     db.delete(row); db.commit(); log_event('vault_file_deleted',user.id,{'vault_file_id':vault_file_id})
     return {'message':'Vault file permanently deleted'}
 
@@ -739,17 +736,17 @@ def vault_change_password(data:VaultPasswordChangeIn,x_vault_password:str=Header
     rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all(); vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
     new_salt=secrets.token_bytes(16); new_key=hashlib.scrypt(data.new_password.encode(),salt=new_salt,n=2**15,r=8,p=1,dklen=32); staged=[]
     for row in rows:
-        path=STORAGE/row.stored_name; old_blob=path.read_bytes(); old_nonce=row.nonce; old_sealed=row.sealed_name
+        old_blob=get_bytes(row.stored_name,STORAGE); old_nonce=row.nonce; old_sealed=row.sealed_name
         plain=AESGCM(old_key).decrypt(base64.b64decode(old_nonce),old_blob,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
         nonce=secrets.token_bytes(12); new_blob=AESGCM(new_key).encrypt(nonce,plain,f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
         name=_vault_open_name(old_key,user.id,row.stored_name,old_sealed); sealed=_vault_seal_name(new_key,user.id,row.stored_name,name)
         staged.append((row,path,old_blob,old_nonce,old_sealed,new_blob,base64.b64encode(nonce).decode(),sealed))
     try:
         for row,path,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged:
-            path.write_bytes(new_blob); row.nonce=nonce; row.sealed_name=sealed
+            put_bytes(row.stored_name,new_blob,STORAGE); row.nonce=nonce; row.sealed_name=sealed
         vault.salt=base64.b64encode(new_salt).decode(); vault.verifier=hmac.new(new_key,b'trustshare-vault-verifier',hashlib.sha256).hexdigest(); db.commit()
     except Exception:
-        for row,path,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged: path.write_bytes(old_blob); row.nonce=old_nonce; row.sealed_name=old_sealed
+        for row,path,old_blob,old_nonce,old_sealed,new_blob,nonce,sealed in staged: put_bytes(row.stored_name,old_blob,STORAGE); row.nonce=old_nonce; row.sealed_name=old_sealed
         db.rollback(); raise
     log_event('vault_password_changed',user.id,{'file_count':len(rows)})
     return {'message':'Vault password changed'}
@@ -759,8 +756,7 @@ def vault_reset(data:ConfirmAccountPasswordIn,user:User=Depends(current_user),db
     if not bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(401,'Account password confirmation failed')
     rows=db.scalars(select(VaultFile).where(VaultFile.user_id==user.id)).all()
     for row in rows:
-        path=STORAGE/row.stored_name
-        if path.exists(): path.unlink()
+        delete_object(row.stored_name,STORAGE)
         db.delete(row)
     vault=db.scalar(select(Vault).where(Vault.user_id==user.id))
     if vault: db.delete(vault)

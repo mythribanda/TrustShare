@@ -818,3 +818,98 @@ def vault_reset(data:ConfirmAccountPasswordIn,user:User=Depends(current_user),db
     if vault: db.delete(vault)
     db.commit(); log_event('vault_reset',user.id,{'deleted_files':len(rows),'severity':'high'})
     return {'message':'Vault reset; encrypted files were permanently deleted.'}
+
+class MfaCodeIn(BaseModel):
+    code:str=Field(min_length=6,max_length=32)
+class MfaDisableIn(BaseModel):
+    password:str=Field(min_length=1,max_length=128)
+    code:str=Field(min_length=6,max_length=32)
+
+def _verify_totp_or_backup(user:User,code:str,mfa:UserMfa,db:Session,consume_backup:bool=True):
+    valid=False
+    try:
+        secret=decrypt_secret(mfa.encrypted_secret,mfa.nonce,mfa.key_version,f'trustshare:mfa:{user.id}')
+        import pyotp
+        valid=pyotp.TOTP(secret).verify(code.strip(),valid_window=1)
+    except Exception as exc:
+        logger.warning(f'MFA verification error: {type(exc).__name__}')
+    if valid: return True
+    hashes=json.loads(mfa.backup_hashes or '[]')
+    supplied=hashlib.sha256(code.strip().upper().encode()).hexdigest()
+    if supplied in hashes:
+        if consume_backup:
+            hashes.remove(supplied); mfa.backup_hashes=json.dumps(hashes); db.commit()
+        return True
+    return False
+
+@app.get('/api/auth/mfa/status')
+def mfa_status(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    mfa=db.scalar(select(UserMfa).where(UserMfa.user_id==user.id))
+    return {'configured':mfa is not None,'enabled':bool(mfa and mfa.enabled),'backup_codes_remaining':len(json.loads(mfa.backup_hashes or '[]')) if mfa else 0}
+
+@app.post('/api/auth/mfa/setup')
+def mfa_setup(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    existing=db.scalar(select(UserMfa).where(UserMfa.user_id==user.id))
+    if existing and existing.enabled: raise HTTPException(409,'MFA is already enabled. Disable it before setting up again.')
+    import pyotp
+    secret=pyotp.random_base32()
+    encrypted,nonce,version=encrypt_secret(secret,f'trustshare:mfa:{user.id}')
+    if existing:
+        existing.encrypted_secret=encrypted; existing.nonce=nonce; existing.key_version=version; existing.enabled=False; existing.backup_hashes='[]'
+    else:
+        db.add(UserMfa(user_id=user.id,encrypted_secret=encrypted,nonce=nonce,key_version=version,enabled=False,backup_hashes='[]'))
+    db.commit(); log_event('mfa_setup_started',user.id)
+    return {'secret':secret,'otpauth_url':pyotp.TOTP(secret).provisioning_uri(name=user.email,issuer_name='TrustShare'),'message':'Add this account to your authenticator, then confirm with a current code. The secret is shown once.'}
+
+@app.post('/api/auth/mfa/confirm')
+def mfa_confirm(data:MfaCodeIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    mfa=db.scalar(select(UserMfa).where(UserMfa.user_id==user.id))
+    if not mfa: raise HTTPException(404,'Start MFA setup first')
+    if mfa.enabled: raise HTTPException(409,'MFA is already enabled')
+    try:
+        secret=decrypt_secret(mfa.encrypted_secret,mfa.nonce,mfa.key_version,f'trustshare:mfa:{user.id}')
+        import pyotp
+        if not pyotp.TOTP(secret).verify(data.code.strip(),valid_window=1): raise HTTPException(400,'Authenticator code is invalid')
+    except HTTPException: raise
+    except Exception: raise HTTPException(500,'MFA setup could not be verified')
+    backup=[secrets.token_hex(5).upper() for _ in range(10)]
+    mfa.enabled=True; mfa.backup_hashes=json.dumps([hashlib.sha256(code.encode()).hexdigest() for code in backup]); db.commit()
+    log_event('mfa_enabled',user.id)
+    return {'enabled':True,'backup_codes':backup,'warning':'Save these backup codes now. They are shown only once.'}
+
+@app.post('/api/auth/mfa/disable')
+def mfa_disable(data:MfaDisableIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if not bcrypt.checkpw(data.password.encode(),user.password_hash.encode()): raise HTTPException(401,'Password confirmation failed')
+    mfa=db.scalar(select(UserMfa).where(UserMfa.user_id==user.id))
+    if not mfa or not mfa.enabled: raise HTTPException(409,'MFA is not enabled')
+    if not _verify_totp_or_backup(user,data.code,mfa,db): raise HTTPException(401,'Authenticator or backup code is invalid')
+    mfa.enabled=False; mfa.backup_hashes='[]'; db.commit(); log_event('mfa_disabled',user.id)
+    return {'enabled':False,'message':'MFA disabled'}
+
+@app.get('/api/auth/sessions')
+def list_auth_sessions(creds:HTTPAuthorizationCredentials=Depends(bearer),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    current_hash=hashlib.sha256(creds.credentials.encode()).hexdigest() if creds else ''
+    rows=db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.revoked==False).order_by(AuthSession.last_active_at.desc())).all()
+    return [{'id':row.id,'current':row.token_hash==current_hash,'ip_address':row.ip_address,'user_agent':row.user_agent,'created_at':row.created_at.isoformat(),'last_active_at':row.last_active_at.isoformat()} for row in rows]
+
+@app.post('/api/auth/sessions/{session_id}/revoke')
+def revoke_auth_session(session_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    row=db.scalar(select(AuthSession).where(AuthSession.id==session_id,AuthSession.user_id==user.id,AuthSession.revoked==False))
+    if not row: raise HTTPException(404,'Active session not found')
+    row.revoked=True
+    if cache:
+        try: cache.delete(f'session:{user.id}:{row.token_hash[:16]}')
+        except Exception as exc: logger.warning(f'Redis session revocation failed: {type(exc).__name__}')
+    db.commit(); log_event('session_revoked',user.id,{'session_id':session_id})
+    return {'message':'Session revoked'}
+
+@app.post('/api/auth/sessions/revoke-all')
+def revoke_all_auth_sessions(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    rows=db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.revoked==False)).all()
+    for row in rows:
+        row.revoked=True
+        if cache:
+            try: cache.delete(f'session:{user.id}:{row.token_hash[:16]}')
+            except Exception as exc: logger.warning(f'Redis session revocation failed: {type(exc).__name__}')
+    db.commit(); log_event('sessions_revoked_all',user.id,{'count':len(rows)})
+    return {'message':'All sessions revoked','count':len(rows)}

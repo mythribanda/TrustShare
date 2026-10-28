@@ -550,6 +550,9 @@ class VaultSetupIn(BaseModel):
     password:str=Field(min_length=12,max_length=128)
 class VaultPasswordChangeIn(BaseModel):
     new_password:str=Field(min_length=12,max_length=128)
+class VaultRenameIn(BaseModel):
+    name:str=Field(min_length=1,max_length=255)
+
 class ConfirmAccountPasswordIn(BaseModel):
     password:str=Field(min_length=1,max_length=128)
 
@@ -798,6 +801,39 @@ def vault_download(vault_file_id:int,x_vault_password:str=Header(...),user:User=
         log_event('vault_decryption_failed',user.id,{'vault_file_id':vault_file_id,'severity':'high'}); raise HTTPException(500,'Vault file could not be decrypted')
     log_event('vault_file_downloaded',user.id,{'vault_file_id':vault_file_id})
     return Response(content=content,media_type=row.content_type,headers={'Content-Disposition':f'attachment; filename="{name}"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+@app.get('/api/vault/files/{vault_file_id}/preview')
+def vault_preview(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db)
+    row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    if row.content_type not in {'application/pdf','image/png','image/jpeg','image/webp','text/plain'}:
+        raise HTTPException(415,'Preview is not supported for this file type')
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    try:
+        content=AESGCM(key).decrypt(base64.b64decode(row.nonce),get_bytes(row.stored_name,STORAGE),f'trustshare:vault-file:{user.id}:{row.stored_name}'.encode())
+        name=_vault_open_name(key,user.id,row.stored_name,row.sealed_name)
+    except Exception:
+        log_event('vault_decryption_failed',user.id,{'vault_file_id':vault_file_id,'severity':'high'})
+        raise HTTPException(500,'Vault file could not be previewed')
+    safe_name=Path(name).name.replace('\\r','').replace('\\n','').replace('"','')
+    log_event('vault_file_previewed',user.id,{'vault_file_id':vault_file_id})
+    return Response(content=content,media_type=row.content_type,headers={'Content-Disposition':f'inline; filename="{safe_name}"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"})
+
+@app.patch('/api/vault/files/{vault_file_id}')
+def vault_rename(vault_file_id:int,data:VaultRenameIn,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):
+    key=_vault_key(user,x_vault_password,db)
+    row=db.scalar(select(VaultFile).where(VaultFile.id==vault_file_id,VaultFile.user_id==user.id))
+    if not row: raise HTTPException(404,'Vault file not found')
+    name=Path(data.name.strip()).name
+    if not name or len(name)>255 or name in {'.','..'}: raise HTTPException(422,'Invalid vault file name')
+    suffix=Path(name).suffix.lower()
+    if suffix not in ALLOWED: raise HTTPException(415,'File type not allowed')
+    sealed=_vault_seal_name(key,user.id,row.stored_name,name)
+    row.sealed_name=sealed
+    db.commit()
+    log_event('vault_file_renamed',user.id,{'vault_file_id':vault_file_id})
+    return {'id':row.id,'name':name,'size':row.size,'content_type':row.content_type,'created_at':row.created_at.isoformat()}
 
 @app.delete('/api/vault/files/{vault_file_id}')
 def vault_delete(vault_file_id:int,x_vault_password:str=Header(...),user:User=Depends(current_user),db:Session=Depends(get_db)):

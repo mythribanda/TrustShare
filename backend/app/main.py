@@ -593,7 +593,7 @@ def public_share(token:str,db:Session=Depends(get_db)):
         log_event('shared_file_decryption_failed',None,{'file_id':f.id,'share_id':sh.id}); raise HTTPException(500,'Unable to decrypt file')
     if policy:
         query=update(SharePolicy).where(SharePolicy.id==policy.id)
-        if policy.max_downloads is not None: query=query.where(SharePolicy.download_count<SharePolicy.max_downloads)
+        if policy.max_downloads is not None: query=query.where(SharePolicy.download_count<policy.max_downloads)
         result=db.execute(query.values(download_count=SharePolicy.download_count+1)); db.commit()
         if result.rowcount!=1: raise HTTPException(410,'Share download limit reached')
     log_event('shared_file_downloaded',None,{'file_id':f.id,'share_id':sh.id})
@@ -633,7 +633,7 @@ def revoke_direct_share(grant_id:int,user:User=Depends(current_user),db:Session=
     grant=db.scalar(select(FileGrant).where(FileGrant.id==grant_id,FileGrant.owner_id==user.id))
     if not grant: raise HTTPException(404,'Share not found')
     file_id=grant.file_id; db.delete(grant); db.commit(); log_event('direct_share_revoked',user.id,{'grant_id':grant_id,'file_id':file_id})
-    return {'message':'Direct share revoked'}
+    return {'message':'Share revoked'}
 
 @app.get('/api/files/{file_id}/preview')
 def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):

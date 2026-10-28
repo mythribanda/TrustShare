@@ -152,7 +152,10 @@ function App() {
     setError('');
     try {
       const path = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
-      const r = await api.post(path, form);
+      const payload = mode === 'register'
+        ? { name: form.name.trim(), email: form.email.trim(), password: form.password }
+        : { email: form.email.trim(), password: form.password, ...(form.otp.trim() ? { otp: form.otp.trim() } : {}) };
+      const r = await api.post(path, payload);
       localStorage.setItem('trustshare_token', r.data.access_token);
       api.defaults.headers.common.Authorization = `Bearer ${r.data.access_token}`;
       setToken(r.data.access_token);

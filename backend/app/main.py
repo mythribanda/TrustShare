@@ -282,6 +282,16 @@ def current_user(creds: HTTPAuthorizationCredentials=Depends(bearer),db:Session=
             logger.warning(f"Redis session lookup failed: {e}")
     user=db.get(User,uid)
     if not user: raise HTTPException(401,'Account not found')
+    session_hash=hashlib.sha256(creds.credentials.encode()).hexdigest()
+    session_record=db.scalar(select(AuthSession).where(AuthSession.token_hash==session_hash))
+    if session_record:
+        if session_record.revoked: raise HTTPException(401,'Session has been revoked')
+        now=datetime.now(timezone.utc)
+        last=session_record.last_active_at
+        if last.tzinfo is None: last=last.replace(tzinfo=timezone.utc)
+        if (now-last).total_seconds()>60:
+            session_record.last_active_at=now
+            db.commit()
     return user
 
 def require_roles(*roles):

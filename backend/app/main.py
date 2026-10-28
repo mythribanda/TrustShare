@@ -636,7 +636,7 @@ def public_share(token:str,request:Request,db:Session=Depends(get_db)):
     return _public_share_response(token,None,db,request)
 
 @app.post('/share/{token}')
-def unlock_public_share(token:str,password:str=Form(...),request:Request=None,db:Session=Depends(get_db)):
+def unlock_public_share(token:str,request:Request,password:str=Form(...),db:Session=Depends(get_db)):
     check_rate_limit(f'ratelimit:share-password:{request.client.host if request and request.client else "unknown"}',limit=10,window=60)
     return _public_share_response(token,password,db,request)
 

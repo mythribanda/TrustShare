@@ -1028,8 +1028,6 @@ def revoke_all_auth_sessions(user:User=Depends(current_user),db:Session=Depends(
             except Exception as exc: logger.warning(f'Redis session revocation failed: {type(exc).__name__}')
     db.commit(); log_event('sessions_revoked_all',user.id,{'count':len(rows)})
     return {'message':'All sessions revoked','count':len(rows)}
-)
-    password:Optional[str]=Field(default=None,min_length=8,max_length=128)
 
 class VaultSetupIn(BaseModel):
     password:str=Field(min_length=12,max_length=128)

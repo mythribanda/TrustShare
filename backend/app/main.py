@@ -582,3 +582,85 @@ def security_dashboard(hours:int=24,user:User=Depends(current_user)):
             events=[{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in e.items()} for e in mdb.activity.find({'timestamp':{'$gte':cutoff}},{'_id':0}).sort('timestamp',-1).limit(100) if e.get('user_id')==user.id or user.role=='admin']
         except Exception: pass
     return {'stats':{'events_in_window':len(events),'failed_logins':sum(e.get('event')=='login_failed' for e in events),'downloads':sum(e.get('event') in ('file_downloaded','shared_file_downloaded') for e in events)},'events':events}
+
+class DirectShareIn(BaseModel):
+    email:EmailStr
+    permission:str=Field(default='view_download',pattern='^(view|view_download)$')
+
+@app.post('/api/files/{file_id}/direct-shares',status_code=201)
+def direct_share(file_id:int,data:DirectShareIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    record=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
+    if not record: raise HTTPException(404,'File not found')
+    recipient=db.scalar(select(User).where(User.email==data.email.lower().strip()))
+    if not recipient: raise HTTPException(404,'Recipient account not found')
+    if recipient.id==user.id: raise HTTPException(400,'You already own this file')
+    existing=db.scalar(select(FileGrant).where(FileGrant.file_id==file_id,FileGrant.recipient_id==recipient.id))
+    if existing: existing.permission=data.permission
+    else: db.add(FileGrant(file_id=file_id,owner_id=user.id,recipient_id=recipient.id,permission=data.permission))
+    db.commit(); log_event('direct_share_created',user.id,{'file_id':file_id,'recipient_id':recipient.id,'permission':data.permission})
+    return {'message':'File shared with recipient','recipient':recipient.email,'permission':data.permission}
+
+@app.get('/api/shares/direct')
+def list_direct_shares(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    received=db.scalars(select(FileGrant).where(FileGrant.recipient_id==user.id)).all()
+    sent=db.scalars(select(FileGrant).where(FileGrant.owner_id==user.id)).all()
+    def pack(grant,side):
+        f=db.get(StoredFile,grant.file_id); owner=db.get(User,grant.owner_id); recipient=db.get(User,grant.recipient_id)
+        return {'grant_id':grant.id,'file_id':grant.file_id,'file_name':f.original_name if f else None,'owner_email':owner.email if owner else None,'recipient_email':recipient.email if recipient else None,'permission':grant.permission,'direction':side,'created_at':grant.created_at.isoformat()}
+    return {'shared_with_me':[pack(g,'received') for g in received],'shared_by_me':[pack(g,'sent') for g in sent]}
+
+@app.delete('/api/shares/direct/{grant_id}')
+def revoke_direct_share(grant_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    grant=db.scalar(select(FileGrant).where(FileGrant.id==grant_id,FileGrant.owner_id==user.id))
+    if not grant: raise HTTPException(404,'Share not found')
+    file_id=grant.file_id; db.delete(grant); db.commit(); log_event('direct_share_revoked',user.id,{'grant_id':grant_id,'file_id':file_id})
+    return {'message':'Direct share revoked'}
+
+@app.get('/api/analytics/files')
+def file_analytics(days:int=30,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    if days not in (7,30,90): raise HTTPException(422,'days must be 7, 30, or 90')
+    files=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all()
+    events=audit_events_for(user,days)
+    by_day={}; today=datetime.now(timezone.utc).date()
+    for i in range(days):
+        day=(today-timedelta(days=days-1-i)).isoformat()
+        by_day[day]={'date':day,'uploads':0,'downloads':0,'shares':0}
+    for event in events:
+        timestamp=event.get('timestamp')
+        if not timestamp: continue
+        day=str(timestamp)[:10]
+        if day not in by_day: continue
+        kind=event.get('event','')
+        if kind=='file_uploaded': by_day[day]['uploads']+=1
+        elif kind in ('file_downloaded','shared_file_downloaded'): by_day[day]['downloads']+=1
+        elif 'share_created' in kind: by_day[day]['shares']+=1
+    types={}
+    for item in files:
+        ext=Path(item.original_name).suffix.lower() or 'no extension'
+        types.setdefault(ext,{'type':ext,'files':0,'bytes':0})
+        types[ext]['files']+=1; types[ext]['bytes']+=item.size
+    stats={'file_count':len(files),'storage_bytes':sum(item.size for item in files),'uploads_in_period':sum(item['uploads'] for item in by_day.values()),'downloads_in_period':sum(item['downloads'] for item in by_day.values()),'share_events_in_period':sum(item['shares'] for item in by_day.values()),'tracked_events':len(events)}
+    return {'days':days,'stats':stats,'storage_by_type':sorted(types.values(),key=lambda item:item['bytes'],reverse=True),'activity':list(by_day.values()),'activity_logging':'mongodb' if mongo_available else 'unavailable'}
+
+@app.get('/api/admin/reports/sharing')
+def admin_sharing_report(user:User=Depends(require_roles('admin')),db:Session=Depends(get_db)):
+    shares=db.scalars(select(FileShare).order_by(FileShare.id.desc())).all(); rows=[]
+    for sh in shares:
+        f=db.get(StoredFile,sh.file_id); owner=db.get(User,sh.owner_id); pol=db.scalar(select(SharePolicy).where(SharePolicy.share_id==sh.id))
+        expired=sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc)
+        rows.append({'share_id':sh.id,'file_id':sh.file_id,'file_name':f.original_name if f else None,'owner_email':owner.email if owner else None,'expires_at':sh.expires_at.isoformat(),'revoked':sh.revoked,'expired':expired,'downloads':pol.download_count if pol else 0,'max_downloads':pol.max_downloads if pol else None,'permission':pol.permission if pol else 'download'})
+    return {'total':len(rows),'active':sum(not row['revoked'] and not row['expired'] for row in rows),'revoked':sum(row['revoked'] for row in rows),'shares':rows}
+
+def _csv_safe(value):
+    text='' if value is None else str(value)
+    if text.lstrip().startswith(('=','+','-','@','\t','\r')): return "'"+text
+    return text
+
+@app.get('/api/admin/audit.csv')
+def export_audit_csv(user:User=Depends(require_roles('admin'))):
+    rows=audit_events_for(user,days=90,admin=True); out=io.StringIO()
+    writer=csv.DictWriter(out,fieldnames=['timestamp','event','user_id','details'],extrasaction='ignore'); writer.writeheader()
+    for row in rows:
+        writer.writerow({'timestamp':_csv_safe(row.get('timestamp')),'event':_csv_safe(row.get('event')),'user_id':_csv_safe(row.get('user_id')),'details':_csv_safe(json.dumps(row.get('details',{}),ensure_ascii=False))})
+    log_event('admin_audit_export',user.id,{'row_count':len(rows),'days':90})
+    return Response(content=out.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="trustshare-audit.csv"','Cache-Control':'no-store'})

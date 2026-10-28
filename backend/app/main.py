@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import MongoClient
-from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, select
+from sqlalchemy import create_engine, String, Integer, DateTime, ForeignKey, Text, Boolean, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 logger = logging.getLogger("trustshare")
@@ -83,6 +83,15 @@ class StoredFile(Base):
     owner_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
     folder_id: Mapped[Optional[int]]=mapped_column(ForeignKey('folders.id'),nullable=True)
     uploaded_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+class FileShare(Base):
+    __tablename__='file_shares'
+    id: Mapped[int]=mapped_column(Integer,primary_key=True)
+    file_id: Mapped[int]=mapped_column(ForeignKey('files.id'),index=True)
+    owner_id: Mapped[int]=mapped_column(ForeignKey('users.id'),index=True)
+    token_hash: Mapped[str]=mapped_column(String(64),unique=True,index=True)
+    expires_at: Mapped[datetime]=mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool]=mapped_column(Boolean,default=False)
 
 Base.metadata.create_all(bind=engine)
 def init_redis(url: str):
@@ -283,14 +292,15 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
     if folder_id is not None and not db.scalar(select(Folder).where(Folder.id==folder_id,Folder.owner_id==user.id)): raise HTTPException(404,'Folder not found')
     stored=f'{uuid.uuid4().hex}{suffix}'; dest=STORAGE/stored; size=0; digest=hashlib.sha256()
     try:
-        with dest.open('wb') as out:
-            while True:
-                chunk=file.file.read(1024*1024)
-                if not chunk: break
-                size+=len(chunk)
-                if size>MAX_UPLOAD_BYTES: raise HTTPException(413,f'File exceeds {MAX_UPLOAD_BYTES//1024//1024} MiB limit')
-                digest.update(chunk); out.write(chunk)
+        chunks=[]
+        while True:
+            chunk=file.file.read(1024*1024)
+            if not chunk: break
+            size+=len(chunk)
+            if size>MAX_UPLOAD_BYTES: raise HTTPException(413,f'File exceeds {MAX_UPLOAD_BYTES//1024//1024} MiB limit')
+            digest.update(chunk); chunks.append(chunk)
         if size==0: raise HTTPException(400,'Empty files are not allowed')
+        with dest.open('wb') as out: out.write(encrypt_bytes(b''.join(chunks),stored))
         record=StoredFile(original_name=original,stored_name=stored,content_type=file.content_type or 'application/octet-stream',size=size,sha256=digest.hexdigest(),owner_id=user.id,folder_id=folder_id)
         db.add(record); db.commit(); db.refresh(record)
         metadata={**file_dict(record),'stored_name':stored,'event':'file_uploaded'}
@@ -308,13 +318,14 @@ def upload_file(file:UploadFile=File(...),folder_id:Optional[int]=Form(None),use
 
 @app.get('/api/files/{file_id}/download')
 def download_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
-    from fastapi.responses import FileResponse
     record=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
     if not record: raise HTTPException(404,'File not found')
     path=STORAGE/record.stored_name
     if not path.is_file(): raise HTTPException(404,'Stored file is missing')
+    try: plaintext=decrypt_bytes(path.read_bytes(),record.stored_name)
+    except Exception: raise HTTPException(500,'Could not decrypt stored file')
     log_event('file_downloaded',user.id,{'file_id':file_id})
-    return FileResponse(path,filename=record.original_name,media_type=record.content_type)
+    return Response(content=plaintext,media_type=record.content_type,headers={'Content-Disposition':f'attachment; filename="{record.original_name}"'})
 
 @app.delete('/api/files/{file_id}')
 def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
@@ -329,3 +340,55 @@ def delete_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(g
         except Exception as e:
             logger.warning(f"MongoDB file deletion failed: {e}")
     log_event('file_deleted',user.id,{'file_id':file_id}); return {'message':'File deleted'}
+
+class ShareCreateIn(BaseModel):
+    expires_in_hours:int=Field(default=24,ge=1,le=168)
+
+@app.post('/api/files/{file_id}/shares',status_code=201)
+def create_share(file_id:int,request:Request,data:ShareCreateIn,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    f=db.scalar(select(StoredFile).where(StoredFile.id==file_id,StoredFile.owner_id==user.id))
+    if not f: raise HTTPException(404,'File not found')
+    token=secrets.token_urlsafe(32)
+    sh=FileShare(file_id=file_id,owner_id=user.id,token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=datetime.now(timezone.utc)+timedelta(hours=data.expires_in_hours))
+    db.add(sh); db.commit(); db.refresh(sh); log_event('share_created',user.id,{'file_id':file_id})
+    return {'id':sh.id,'url':str(request.base_url).rstrip('/')+'/share/'+token,'expires_at':sh.expires_at.isoformat()}
+
+@app.get('/share/{token}')
+def public_share(token:str,db:Session=Depends(get_db)):
+    sh=db.scalar(select(FileShare).where(FileShare.token_hash==hashlib.sha256(token.encode()).hexdigest()))
+    if not sh or sh.revoked or sh.expires_at.replace(tzinfo=timezone.utc)<datetime.now(timezone.utc): raise HTTPException(404,'Share expired or revoked')
+    f=db.get(StoredFile,sh.file_id)
+    if not f: raise HTTPException(404,'File not found')
+    try: data=decrypt_bytes((STORAGE/f.stored_name).read_bytes(),f.stored_name)
+    except Exception: raise HTTPException(500,'Unable to decrypt file')
+    log_event('shared_file_downloaded',None,{'file_id':f.id})
+    return Response(content=data,media_type=f.content_type,headers={'Content-Disposition':f'attachment; filename="{f.original_name}"'})
+
+@app.post('/api/shares/{share_id}/revoke')
+def revoke_share(share_id:int,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    sh=db.scalar(select(FileShare).where(FileShare.id==share_id,FileShare.owner_id==user.id))
+    if not sh: raise HTTPException(404,'Share not found')
+    sh.revoked=True; db.commit(); log_event('share_revoked',user.id,{'share_id':share_id})
+    return {'message':'Share revoked'}
+
+@app.get('/api/dashboard/user')
+def user_dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
+    fs=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all()
+    ss=db.scalars(select(FileShare).where(FileShare.owner_id==user.id)).all()
+    return {'stats':{'files':len(fs),'storage_bytes':sum(x.size for x in fs),'shares_total':len(ss),'role':user.role}}
+
+@app.get('/api/dashboard/admin')
+def admin_dashboard(user:User=Depends(require_roles('admin')),db:Session=Depends(get_db)):
+    fs=db.scalars(select(StoredFile)).all(); us=db.scalars(select(User)).all()
+    return {'stats':{'users_total':len(us),'files_total':len(fs),'storage_bytes':sum(x.size for x in fs),'shares_total':db.scalar(select(func.count()).select_from(FileShare)) or 0,'database_backend':db_backend,'mongo_available':mongo_available,'redis_available':cache is not None}}
+
+@app.get('/api/dashboard/security')
+def security_dashboard(hours:int=24,user:User=Depends(current_user)):
+    if hours not in (24,168,720): raise HTTPException(422,'Invalid time window')
+    events=[]
+    if mongo_available and mdb is not None:
+        try:
+            cutoff=datetime.now(timezone.utc)-timedelta(hours=hours)
+            events=[{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in e.items()} for e in mdb.activity.find({'timestamp':{'$gte':cutoff}},{'_id':0}).sort('timestamp',-1).limit(100) if e.get('user_id') in (user.id,None) or user.role=='admin']
+        except Exception: pass
+    return {'stats':{'events_in_window':len(events),'failed_logins':sum(e.get('event')=='login_failed' for e in events),'downloads':sum(e.get('event') in ('file_downloaded','shared_file_downloaded') for e in events)},'events':events}

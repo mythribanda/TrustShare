@@ -82,3 +82,20 @@ def decrypt_bytes(blob:bytes,file_context:str,wrapped_key:str,wrap_nonce:str,key
     if pos!=len(blob):
         raise ValueError("Encrypted file has trailing data")
     return b"".join(plaintext)
+
+
+def encrypt_secret(value:str, context:str):
+    keys=_keyring()
+    version=int(os.getenv("ACTIVE_MASTER_KEY_VERSION",str(max(keys))))
+    if version not in keys: raise RuntimeError("Active master-key version is not present in MASTER_KEYS")
+    nonce=secrets.token_bytes(12)
+    aad=(context+":"+str(version)).encode()
+    encrypted=AESGCM(keys[version]).encrypt(nonce,value.encode(),aad)
+    return base64.b64encode(encrypted).decode(),base64.b64encode(nonce).decode(),version
+
+def decrypt_secret(encrypted:str, nonce:str, version:int, context:str):
+    keys=_keyring()
+    if version not in keys: raise ValueError("Master-key version is unavailable")
+    aad=(context+":"+str(version)).encode()
+    raw=AESGCM(keys[version]).decrypt(base64.b64decode(nonce),base64.b64decode(encrypted),aad)
+    return raw.decode()

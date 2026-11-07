@@ -703,6 +703,74 @@ def preview_file(file_id:int,user:User=Depends(current_user),db:Session=Depends(
         log_event('file_decryption_failed',user.id,{'file_id':file_id}); raise HTTPException(500,'Could not preview file')
     return Response(content=content,media_type=f.content_type,headers={'Content-Disposition':f'inline; filename="{f.original_name}"','X-Content-Type-Options':'nosniff','Cache-Control':'no-store'})
 
+def notification_payload(event):
+    event_name=event.get('event','activity')
+    details=event.get('details') or {}
+    labels={
+        'share_created':('File shared','A secure sharing link was created.'),
+        'direct_share_created':('File shared with you','A file was shared with your account.'),
+        'file_downloaded':('File downloaded','A file in your account was downloaded.'),
+        'shared_file_downloaded':('Shared file accessed','A shared file was downloaded.'),
+        'login_failed':('Failed login attempt','A login attempt was unsuccessful.'),
+        'request_blocked':('Access blocked','A request was blocked by a security control.'),
+        'file_decryption_failed':('File security warning','A file could not be decrypted.'),
+        'vault_locked':('Secure Vault locked','The Secure Vault was locked after failed attempts.')
+    }
+    title,message=labels.get(event_name,('Account activity','There is new activity on your TrustShare account.'))
+    return {'id':str(event.get('_id','')),'event':event_name,'title':title,'message':message,'details':details,'created_at':event.get('timestamp').isoformat() if event.get('timestamp') else None}
+
+@app.get('/api/notifications')
+def list_notifications(limit:int=Query(default=30,ge=1,le=100),user:User=Depends(current_user)):
+    if not mongo_available or mdb is None:
+        return {'items':[],'unread':0,'available':False}
+    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked']
+    query={'user_id':user.id,'event':{'$in':allowed_events}}
+    try:
+        events=list(mdb.activity.find(query).sort('timestamp',-1).limit(limit))
+        ids=[str(item['_id']) for item in events]
+        read_ids=set()
+        if ids:
+            read_ids={item['event_id'] for item in mdb.notification_reads.find({'user_id':user.id,'event_id':{'$in':ids}},{'event_id':1})}
+        items=[]
+        for event in events:
+            payload=notification_payload(event)
+            payload['read']=payload['id'] in read_ids
+            items.append(payload)
+        return {'items':items,'unread':sum(not item['read'] for item in items),'available':True}
+    except Exception as exc:
+        logger.warning(f"Notification retrieval failed: {exc}")
+        raise HTTPException(503,'Notifications are temporarily unavailable')
+
+@app.post('/api/notifications/{notification_id}/read')
+def mark_notification_read(notification_id:str,user:User=Depends(current_user)):
+    if not mongo_available or mdb is None:
+        raise HTTPException(503,'Notification storage is unavailable')
+    try:
+        from bson import ObjectId
+        oid=ObjectId(notification_id)
+    except Exception:
+        raise HTTPException(404,'Notification not found')
+    event=mdb.activity.find_one({'_id':oid,'user_id':user.id})
+    if not event or event.get('event') not in ('share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked'):
+        raise HTTPException(404,'Notification not found')
+    mdb.notification_reads.update_one({'user_id':user.id,'event_id':notification_id},{'$set':{'user_id':user.id,'event_id':notification_id,'read_at':datetime.now(timezone.utc)}},upsert=True)
+    return {'message':'Notification marked as read','id':notification_id}
+
+@app.post('/api/notifications/read-all')
+def mark_all_notifications_read(user:User=Depends(current_user)):
+    if not mongo_available or mdb is None:
+        raise HTTPException(503,'Notification storage is unavailable')
+    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked']
+    try:
+        events=mdb.activity.find({'user_id':user.id,'event':{'$in':allowed_events}},{'_id':1})
+        now=datetime.now(timezone.utc)
+        for event in events:
+            mdb.notification_reads.update_one({'user_id':user.id,'event_id':str(event['_id'])},{'$set':{'user_id':user.id,'event_id':str(event['_id']),'read_at':now}},upsert=True)
+        return {'message':'All notifications marked as read'}
+    except Exception as exc:
+        logger.warning(f"Mark-all notifications failed: {exc}")
+        raise HTTPException(503,'Notifications are temporarily unavailable')
+
 @app.get('/api/dashboard/user')
 def user_dashboard(user:User=Depends(current_user),db:Session=Depends(get_db)):
     files=db.scalars(select(StoredFile).where(StoredFile.owner_id==user.id)).all(); shares=db.scalars(select(FileShare).where(FileShare.owner_id==user.id)).all(); grants=db.scalars(select(FileGrant).where(FileGrant.owner_id==user.id)).all()

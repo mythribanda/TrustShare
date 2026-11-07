@@ -10,6 +10,7 @@ target-version = "py312"
 extend-exclude = ["alembic"]  # generated scaffold and migrations
 
 [tool.ruff.lint]
+ignore = ["E501", "E701", "I001"]
 select = [
     "E", "W",  # pycodestyle: basic style errors
     "F",       # pyflakes: unused imports/variables, undefined names

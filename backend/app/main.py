@@ -766,7 +766,7 @@ def mark_notification_read(notification_id:str,user:User=Depends(current_user)):
 def mark_all_notifications_read(user:User=Depends(current_user)):
     if not mongo_available or mdb is None:
         raise HTTPException(503,'Notification storage is unavailable')
-    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked']
+    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','shared_file_accessed','shared_file_decryption_failed','login_failed','login_mfa_failed','request_blocked','file_decryption_failed','vault_decryption_failed','vault_locked']
     try:
         events=mdb.activity.find({'user_id':user.id,'event':{'$in':allowed_events}},{'_id':1})
         now=datetime.now(timezone.utc)

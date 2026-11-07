@@ -25,7 +25,8 @@ import {
   X,
   UploadCloud,
   FileCode,
-  Check
+  Check,
+  Bell
 } from 'lucide-react';
 import LandingPage from './components/LandingPage';
 import SecurityCenter from './components/SecurityCenter';
@@ -58,6 +59,9 @@ function App() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState({});
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Modals state
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
@@ -95,7 +99,7 @@ function App() {
       const r = await api.get('/api/auth/me');
       setUser(r.data.user);
       setView('dashboard');
-      await Promise.all([loadFiles(), loadFolders()]);
+      await Promise.all([loadFiles(), loadFolders(), loadNotifications()]);
     } catch {
       logout();
     }
@@ -117,6 +121,36 @@ function App() {
       const r = await api.get('/api/folders');
       setFolders(r.data);
     } catch {}
+  }
+
+  async function loadNotifications() {
+    try {
+      const r = await api.get('/api/notifications');
+      setNotifications(r.data.items || []);
+      setUnreadNotifications(r.data.unread || 0);
+    } catch (e) {
+      console.warn('Could not load notifications:', e.response?.data?.detail || e.message);
+    }
+  }
+
+  async function markNotificationRead(id) {
+    try {
+      await api.post('/api/notifications/' + id + '/read');
+      setNotifications(items => items.map(item => item.id === id ? { ...item, read: true } : item));
+      setUnreadNotifications(count => Math.max(0, count - 1));
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not update notification');
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await api.post('/api/notifications/read-all');
+      setNotifications(items => items.map(item => ({ ...item, read: true })));
+      setUnreadNotifications(0);
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not update notifications');
+    }
   }
 
   useEffect(() => {
@@ -585,6 +619,37 @@ function App() {
             <div className="top-sub">A little more order for your workday.</div>
           </div>
           <div className="top-actions">
+            <div className="relative">
+              <button
+                onClick={() => { setShowNotifications(open => !open); if (!showNotifications) loadNotifications(); }}
+                className="secondary relative"
+                title="Notifications"
+                aria-label="Notifications"
+              >
+                <Bell size={16} />
+                {unreadNotifications > 0 && <span className="absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-white text-[9px] flex items-center justify-center">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
+              </button>
+              {showNotifications && (
+                <div className="absolute right-0 top-11 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <div><div className="text-sm font-semibold text-slate-800">Notifications</div><div className="text-[11px] text-slate-500">{unreadNotifications} unread</div></div>
+                    <div className="flex items-center gap-2">
+                      {unreadNotifications > 0 && <button onClick={markAllNotificationsRead} className="text-[11px] font-semibold text-indigo-600">Mark all read</button>}
+                      <button onClick={() => setShowNotifications(false)} aria-label="Close notifications"><X size={16} /></button>
+                    </div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? <div className="px-4 py-8 text-center text-xs text-slate-500">You're all caught up.</div> : notifications.map(item => (
+                      <button key={item.id} onClick={() => !item.read && markNotificationRead(item.id)} className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${item.read ? 'opacity-70' : 'bg-indigo-50/40'}`}>
+                        <div className="flex items-start justify-between gap-2"><span className="text-xs font-semibold text-slate-800">{item.title}</span>{!item.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />}</div>
+                        <div className="mt-1 text-[11px] leading-4 text-slate-600">{item.message}</div>
+                        <div className="mt-1 text-[10px] text-slate-400">{item.created_at ? new Date(item.created_at).toLocaleString() : ''}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => setView('landing')}
               className="secondary preview-landing-btn"

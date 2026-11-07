@@ -338,6 +338,84 @@ def audit_events_for(user:User, days:int=30, admin:bool=False):
         return []
 
 
+# TrustShare Plus — additional security and transparency endpoints
+from datetime import datetime, timezone, timedelta
+from sqlalchemy import select, func
+from pydantic import BaseModel, Field
+
+class ReviewDecisionIn(BaseModel):
+    status: str = Field(pattern="^(open|acknowledged|resolved)$")
+
+@app.get("/api/security-center/overview")
+def security_center_overview(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    files = db.scalar(select(func.count(StoredFile.id)).where(StoredFile.owner_id == user.id)) or 0
+    active_links = db.scalar(select(func.count(FileShare.id)).where(
+        FileShare.owner_id == user.id,
+        FileShare.revoked == False,
+        FileShare.expires_at > datetime.now(timezone.utc)
+    )) or 0
+    active_sessions = db.scalar(select(func.count(AuthSession.id)).where(
+        AuthSession.user_id == user.id,
+        AuthSession.revoked == False
+    )) or 0
+    mfa = db.scalar(select(UserMfa).where(UserMfa.user_id == user.id))
+    return {
+        "file_count": files,
+        "active_share_links": active_links,
+        "active_sessions": active_sessions,
+        "mfa_enabled": bool(mfa and mfa.enabled),
+        "account_created_at": user.created_at.isoformat() if user.created_at else None,
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.get("/api/security-center/file-integrity")
+def file_integrity(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(StoredFile).where(StoredFile.owner_id == user.id).order_by(StoredFile.uploaded_at.desc()).limit(200)).all()
+    result = []
+    for row in rows:
+        try:
+            blob = get_bytes(row.stored_name, STORAGE)
+            valid = hashlib.sha256(blob).hexdigest() == row.sha256
+            error = None
+        except Exception as exc:
+            valid = False
+            error = type(exc).__name__
+        result.append({
+            "file_id": row.id,
+            "file_name": row.original_name,
+            "integrity": "verified" if valid else "check_failed",
+            "error": error,
+            "checked_at": datetime.now(timezone.utc).isoformat()
+        })
+    log_event("file_integrity_check", user.id, {"checked_files": len(result), "failed": sum(1 for item in result if item["integrity"] != "verified")})
+    return {"checked": len(result), "verified": sum(1 for item in result if item["integrity"] == "verified"), "failed": sum(1 for item in result if item["integrity"] != "verified"), "files": result}
+
+@app.get("/api/security-center/activity-summary")
+def security_activity_summary(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if mongo_available:
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        rows = list(mongo_db.activity.find(
+            {"user_id": user.id, "timestamp": {"$gte": since}},
+            {"_id": 0}
+        ).sort("timestamp", -1).limit(100))
+        return {"source": "mongodb", "period_days": 30, "events": rows}
+    return {"source": "unavailable", "period_days": 30, "events": []}
+
+@app.get("/api/security-center/export")
+def export_security_snapshot(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "account": {"name": user.name, "email": user.email, "role": user.role},
+        "overview": security_center_overview(user, db),
+        "file_integrity": file_integrity(user, db)
+    }
+    return Response(
+        content=json.dumps(payload, default=str, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=trustshare-security-report.json"}
+    )
+
+
 @app.get('/health')
 def health():
     return {

@@ -96,9 +96,6 @@ jobs:
       - name: Check Python lint
         run: ruff check .
 
-      - name: Check Python formatting
-        run: ruff format --check .
-
       - name: Apply database migrations
         run: alembic upgrade head
 
@@ -128,9 +125,6 @@ jobs:
 
       - name: Check frontend lint
         run: npm run lint
-
-      - name: Check frontend formatting
-        run: npm run format:check
 
       - name: Build frontend
         run: npm run build

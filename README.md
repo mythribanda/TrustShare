@@ -69,6 +69,16 @@ The migration asks for the exact confirmation word `ENCRYPT`. It skips files wit
 
 **5. Run checks.** From `backend/`, run `PYTHONPATH=. pytest -q` (PowerShell: `$env:PYTHONPATH='.'; pytest -q`). GitHub Actions compiles the backend, runs security unit tests, and builds the frontend.
 
+### In-app notifications API
+
+The `trustshare-complete` development branch adds authenticated notification endpoints backed by MongoDB activity records:
+
+- `GET /api/notifications?limit=30` — returns the signed-in user's recent share, download, login, access-block, MFA, decryption, and Secure Vault security events with read status.
+- `POST /api/notifications/{notification_id}/read` — marks one of the user's notifications as read.
+- `POST /api/notifications/read-all` — marks the signed-in user's notifications as read.
+
+The notification API is backend functionality in this branch; the dashboard notification panel and email delivery are not yet connected. MongoDB must be available for persistent notification history. Email delivery requires a configured provider and is not represented as active by default.
+
 ### Milestone 2 API highlights
 
 - `POST /api/files/{id}/shares`, `GET /api/shares/links`, `POST /api/shares/{id}/revoke`, `GET /share/{token}`

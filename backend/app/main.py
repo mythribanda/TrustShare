@@ -711,6 +711,10 @@ def notification_payload(event):
         'direct_share_created':('File shared with you','A file was shared with your account.'),
         'file_downloaded':('File downloaded','A file in your account was downloaded.'),
         'shared_file_downloaded':('Shared file accessed','A shared file was downloaded.'),
+        'shared_file_accessed':('Shared file accessed','A shared link was opened.'),
+        'shared_file_decryption_failed':('Shared file security warning','A shared file could not be decrypted.'),
+        'login_mfa_failed':('MFA verification failed','A multi-factor authentication attempt was unsuccessful.'),
+        'vault_decryption_failed':('Secure Vault warning','A Secure Vault file could not be decrypted.'),
         'login_failed':('Failed login attempt','A login attempt was unsuccessful.'),
         'request_blocked':('Access blocked','A request was blocked by a security control.'),
         'file_decryption_failed':('File security warning','A file could not be decrypted.'),
@@ -725,7 +729,7 @@ def list_notifications(limit:int=30,user:User=Depends(current_user)):
         raise HTTPException(422,'limit must be between 1 and 100')
     if not mongo_available or mdb is None:
         return {'items':[],'unread':0,'available':False}
-    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked']
+    allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','shared_file_accessed','shared_file_decryption_failed','login_failed','login_mfa_failed','request_blocked','file_decryption_failed','vault_decryption_failed','vault_locked']
     query={'user_id':user.id,'event':{'$in':allowed_events}}
     try:
         events=list(mdb.activity.find(query).sort('timestamp',-1).limit(limit))

@@ -19,7 +19,7 @@ import ProductPreview from '../components/landing/ProductPreview';
 import Logo from '../components/Logo';
 
 const GITHUB_URL =
-  'https://github.com/Vimaladharsan/TrustShare-Encrypted-File-Sharing-Collaboration-Platform';
+  'https://github.com/mythribanda/TrustShare';
 
 // Real numbers from the system's design – no invented user counts.
 const FACTS = [

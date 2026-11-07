@@ -92,7 +92,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <div className="border-b border-white/10 bg-white/[0.03]">
         <div className="mx-auto flex max-w-7xl items-center justify-center gap-2 px-4 py-2 text-center text-xs text-slate-300 sm:text-sm">
           <span className="h-2 w-2 rounded-full bg-indigo-400" />
-          Secure file storage and sharing, with control in your hands
+          A privacy-first workspace built by Mythri Raj Banda
         </div>
       </div>
 

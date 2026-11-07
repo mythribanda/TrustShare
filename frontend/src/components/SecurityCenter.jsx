@@ -120,7 +120,7 @@ const accountPassword=window.prompt('This permanently deletes every file in your
 if(!accountPassword)return;
 if(!window.confirm('FINAL WARNING: your encrypted vault files will be permanently deleted. Continue?'))return;
 setError('');
-try{await apiFetch('/api/vault/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:accountPassword})});setVaultPassword('');setVaultSetupPassword('');setVaultNewPassword('');setVaultFiles([]);setVaultStatus({configured:false,file_count:0});setData({configured:false,file_count:0});setNotice?.('')}
+try{await apiFetch('/api/vault/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:accountPassword})});setVaultPassword('');setVaultSetupPassword('');setVaultNewPassword('');setVaultFiles([]);setVaultStatus({configured:false,file_count:0});setData({configured:false,file_count:0})}
 catch(e){setError(e.message)}
 }
 async function beginMfaSetup(){

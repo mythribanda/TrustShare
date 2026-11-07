@@ -1,0 +1,196 @@
+import { History, KeyRound, Link2, Share2, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
+
+import { getErrorMessage } from '../api/client';
+import { listSentShares, revokeShare } from '../api/shares';
+import Button from '../components/Button';
+import ConfirmDialog from '../components/ConfirmDialog';
+import AccessHistoryDialog from '../components/shares/AccessHistoryDialog';
+import EditShareDialog from '../components/shares/EditShareDialog';
+import ShareStatusBadge from '../components/shares/ShareStatusBadge';
+import { Empty, ErrorState, Loading } from '../components/StateMessage';
+import { formatDate } from '../utils/format';
+import { downloadsLabel, expiryLabel, permissionLabel } from '../utils/shares';
+
+const FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'ended', label: 'Ended' },
+];
+
+/** Every link and direct share I created, with its live status, downloads and a Revoke button. */
+export default function SharedByMePage() {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [confirm, setConfirm] = useState(null);
+  const [editing, setEditing] = useState(null); // the share being edited
+  const [historyOf, setHistoryOf] = useState(null); // the share whose access history is open
+
+  const load = useCallback(() => {
+    setError('');
+    listSentShares()
+      .then(setItems)
+      .catch((err) => setError(getErrorMessage(err)));
+  }, []);
+
+  useEffect(load, [load]);
+
+  function askRevoke(share) {
+    setConfirm({
+      title: 'Revoke this share?',
+      message:
+        share.share_type === 'link'
+          ? `Anyone using this link to “${share.file_name}” will lose access immediately.`
+          : `${share.recipient_name} will lose access to “${share.file_name}” immediately.`,
+      action: async () => {
+        try {
+          await revokeShare(share.id);
+          toast.success('Share revoked');
+          load();
+        } catch (err) {
+          toast.error(getErrorMessage(err));
+        }
+      },
+    });
+  }
+
+  const shown = (items || []).filter((share) => {
+    if (filter === 'active') return share.status === 'active';
+    if (filter === 'ended') return share.status !== 'active';
+    return true;
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Shared by me</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Links and people you shared files with. Create shares from My Files (⋮ → Share).
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {FILTERS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilter(value)}
+              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${filter === value ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 ring-inset hover:bg-slate-50 hover:text-slate-900'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && !items && <Loading />}
+      {!error && items && shown.length === 0 && (
+        <Empty
+          icon={Share2}
+          title={items.length ? 'No shares match this filter' : "You haven't shared anything yet"}
+          text="Open My Files, click ⋮ next to a file and choose Share."
+        />
+      )}
+
+      {!error && shown.length > 0 && (
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+              <tr>
+                <th className="px-4 py-3 font-medium">File</th>
+                <th className="px-4 py-3 font-medium">Shared with</th>
+                <th className="px-4 py-3 font-medium">Access</th>
+                <th className="px-4 py-3 font-medium">Expires</th>
+                <th className="px-4 py-3 font-medium">Downloads</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {shown.map((share) => (
+                <tr key={share.id}>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-900">
+                      {share.file_name ?? 'Deleted file'}
+                    </p>
+                    <p className="text-xs text-slate-500">Created {formatDate(share.created_at)}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="flex items-center gap-2 text-slate-700">
+                      {share.share_type === 'link' ? (
+                        <>
+                          <Link2 className="size-4 text-slate-400" aria-hidden="true" /> Anyone with
+                          the link
+                          {share.has_password && (
+                            <KeyRound
+                              className="size-3.5 text-amber-500"
+                              aria-label="Password protected"
+                            />
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <UserRound className="size-4 text-slate-400" aria-hidden="true" />
+                          {share.recipient_email}
+                        </>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{permissionLabel(share.permission)}</td>
+                  <td className="px-4 py-3 text-slate-600">{expiryLabel(share.expires_at)}</td>
+                  <td className="px-4 py-3 text-slate-600">{downloadsLabel(share)}</td>
+                  <td className="px-4 py-3">
+                    <ShareStatusBadge status={share.status} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        onClick={() => setHistoryOf(share)}
+                        aria-label={`Access history of ${share.file_name ?? 'this share'}`}
+                        title="Who opened, viewed or downloaded it"
+                      >
+                        <History className="size-4" aria-hidden="true" />
+                      </Button>
+                      {share.status !== 'revoked' && (
+                        <>
+                          {share.file_name && share.status !== 'file_unavailable' && (
+                            <Button variant="secondary" onClick={() => setEditing(share)}>
+                              Edit
+                            </Button>
+                          )}
+                          <Button variant="secondary" onClick={() => askRevoke(share)}>
+                            Revoke
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {historyOf && <AccessHistoryDialog share={historyOf} onClose={() => setHistoryOf(null)} />}
+
+      {editing && (
+        <EditShareDialog share={editing} onSaved={load} onClose={() => setEditing(null)} />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          message={confirm.message}
+          confirmLabel="Revoke"
+          onConfirm={confirm.action}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+    </div>
+  );
+}

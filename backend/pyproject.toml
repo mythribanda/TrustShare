@@ -1,0 +1,45 @@
+[project]
+name = "trustshare-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+# ---------- ruff: linter + formatter ----------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic"]  # generated scaffold and migrations
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle: basic style errors
+    "F",       # pyflakes: unused imports/variables, undefined names
+    "I",       # import sorting
+    "B",       # bugbear: likely bugs
+    "UP",      # pyupgrade: modern Python syntax
+    "S",       # bandit: security problems
+    "SIM",     # simplifications
+    "ASYNC",   # async pitfalls
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency injection intentionally uses these calls as parameter defaults.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.params.Depends",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is how pytest checks things; test passwords are fake by design.
+"tests/**" = ["S101", "S105", "S106"]
+
+# ---------- pytest ----------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    # botocore (boto3) still calls datetime.utcnow() internally – not our code.
+    "ignore:datetime.datetime.utcnow:DeprecationWarning:botocore.*",
+]

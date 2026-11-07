@@ -2,7 +2,7 @@ name: TrustShare security checks
 
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "trustshare-complete"]
   pull_request:
     branches: ["main"]
 

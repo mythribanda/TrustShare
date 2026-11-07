@@ -720,7 +720,9 @@ def notification_payload(event):
     return {'id':str(event.get('_id','')),'event':event_name,'title':title,'message':message,'details':details,'created_at':event.get('timestamp').isoformat() if event.get('timestamp') else None}
 
 @app.get('/api/notifications')
-def list_notifications(limit:int=Query(default=30,ge=1,le=100),user:User=Depends(current_user)):
+def list_notifications(limit:int=30,user:User=Depends(current_user)):
+    if limit<1 or limit>100:
+        raise HTTPException(422,'limit must be between 1 and 100')
     if not mongo_available or mdb is None:
         return {'items':[],'unread':0,'available':False}
     allowed_events=['share_created','direct_share_created','file_downloaded','shared_file_downloaded','login_failed','request_blocked','file_decryption_failed','vault_locked']

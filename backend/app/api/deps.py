@@ -1,0 +1,115 @@
+"""Reusable dependencies for routes: who is calling, and are they allowed?"""
+
+import uuid
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+import jwt
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import AppError
+from app.core.permissions import Perm
+from app.core.security import decode_access_token, issued_at_ms
+from app.db.postgres import get_db
+from app.db.redis import get_redis
+from app.models import User
+from app.repositories.user_repository import UserRepository
+from app.services.security_events import record_security_event
+from app.services.session_service import SessionService
+
+# Reads "Authorization: Bearer <token>". auto_error=False so we return our own error format.
+bearer_scheme = HTTPBearer(auto_error=False, description="Paste the access_token from /login")
+
+
+def _unauthorized(code: str, message: str) -> AppError:
+    return AppError(code, message, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+
+
+def _invalid_token() -> AppError:
+    return _unauthorized("INVALID_TOKEN", "Your session is invalid or has expired.")
+
+
+async def get_token_payload(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    """401 unless the request carries a valid, unexpired, non-revoked access token."""
+    if credentials is None:
+        raise _unauthorized("NOT_AUTHENTICATED", "Please log in.")
+    try:
+        payload = decode_access_token(credentials.credentials)
+        user_id = uuid.UUID(payload["sub"])
+    except jwt.ExpiredSignatureError as exc:
+        raise _invalid_token() from exc  # normal: the app refreshes it
+    except (jwt.InvalidTokenError, ValueError) as exc:
+        # Tampered with, signed with another key, or malformed – worth a security event.
+        await record_security_event(
+            "unauthorized_access",
+            request=request,
+            message="Invalid or forged access token",
+            details={"path": request.url.path},
+        )
+        raise _invalid_token() from exc
+
+    # Logged out (this token) or logged out everywhere (all tokens before that moment).
+    if await SessionService(redis).is_access_token_revoked(
+        user_id, payload.get("jti", ""), issued_at_ms(payload), payload.get("sid")
+    ):
+        raise _invalid_token()
+    return payload
+
+
+async def get_current_user(
+    payload: dict[str, Any] = Depends(get_token_payload),
+    session: AsyncSession = Depends(get_db),
+) -> User:
+    """The logged-in user, loaded fresh from the database on every request."""
+    # Loading the user each time means a role change or deactivation applies immediately.
+    user = await UserRepository(session).get_by_id(uuid.UUID(payload["sub"]))
+    if user is None or not user.is_active:
+        raise _invalid_token()
+
+    # Tokens issued before the last password change are no longer accepted.
+    changed = user.password_changed_at
+    if changed and issued_at_ms(payload) < changed.timestamp() * 1000:
+        raise _invalid_token()
+    return user
+
+
+def require_permission(permission: Perm) -> Callable[..., Awaitable[User]]:
+    """Route guard: 401 if not logged in, 403 if the user's role lacks this permission."""
+
+    async def checker(request: Request, user: User = Depends(get_current_user)) -> User:
+        if permission not in user.permission_codes:
+            from app.activity_monitoring.service import record_activity
+
+            await record_activity(
+                request,
+                user,
+                "auth.access_denied",
+                status="failure",
+                details={"path": request.url.path, "permission": str(permission)},
+            )
+            await record_security_event(
+                "unauthorized_access",
+                request=request,
+                user=user,
+                message="Access denied – missing permission",
+                details={"path": request.url.path, "permission": str(permission)},
+            )
+            raise AppError("FORBIDDEN", "You don't have permission to do this.", status_code=403)
+        return user
+
+    return checker
+
+
+# Ready-made guards, created once (instead of on every route definition).
+can_read_files = require_permission(Perm.FILE_READ)
+can_upload_files = require_permission(Perm.FILE_UPLOAD)
+can_update_files = require_permission(Perm.FILE_UPDATE)
+can_delete_files = require_permission(Perm.FILE_DELETE)
+can_manage_folders = require_permission(Perm.FOLDER_MANAGE)

@@ -1,0 +1,100 @@
+import { api } from './client';
+import { saveBlob } from './files';
+
+// Sharing (backend app/api/routes/shares.py).
+
+// ---------- owner ----------
+
+/**
+ * body: { share_type: 'link' | 'user', permission: 'view' | 'download',
+ *         expires_at?: ISO string, max_downloads?: number, recipient_email?: string }
+ * For links the response contains `url` – shown once, the server keeps only its hash.
+ */
+export async function createShare(fileId, body) {
+  const { data } = await api.post(`/files/${fileId}/shares`, body);
+  return data;
+}
+
+/**
+ * The same share for several files: { created: [share (+ url for links)], failed: [...] }.
+ * A person gets one notification and email for all of them.
+ */
+export async function createSharesBulk(fileIds, body) {
+  const { data } = await api.post('/shares/bulk', { ...body, file_ids: fileIds });
+  return data;
+}
+
+/** Every file in a folder (sub-folders included), same result shape as createSharesBulk. */
+export async function createFolderShares(folderId, body) {
+  const { data } = await api.post(`/folders/${folderId}/shares`, body);
+  return data;
+}
+
+export async function listFileShares(fileId) {
+  const { data } = await api.get(`/files/${fileId}/shares`);
+  return data.items;
+}
+
+export async function listSentShares() {
+  const { data } = await api.get('/shares/sent');
+  return data.items;
+}
+
+/** changes: any of { permission, expires_at (ISO or null), max_downloads (number or null) }. */
+export async function updateShare(shareId, changes) {
+  const { data } = await api.patch(`/shares/${shareId}`, changes);
+  return data;
+}
+
+/** Who opened, viewed or downloaded one of my shares: { summary, items }. */
+export async function getShareAccess(shareId) {
+  const { data } = await api.get(`/shares/${shareId}/access`);
+  return data;
+}
+
+export const revokeShare = (shareId) => api.delete(`/shares/${shareId}`);
+
+// ---------- recipient ("Shared with me") ----------
+
+export async function listReceivedShares() {
+  const { data } = await api.get('/shares/received');
+  return data.items;
+}
+
+export async function previewReceived(shareId, signal) {
+  const response = await api.get(`/shares/${shareId}/preview`, { responseType: 'blob', signal });
+  return response.data;
+}
+
+export async function downloadReceived(share) {
+  const response = await api.get(`/shares/${share.id}/download`, { responseType: 'blob' });
+  saveBlob(response.data, share.file_name);
+}
+
+// ---------- public link (no login needed) ----------
+// Links with a password: the typed password goes in a header (URL-encoded) with every request.
+
+const passwordHeaders = (password) =>
+  password ? { 'X-Share-Password': encodeURIComponent(password) } : {};
+
+export async function getPublicShare(token, password) {
+  const { data } = await api.get(`/s/${token}`, { headers: passwordHeaders(password) });
+  return data;
+}
+
+export async function previewPublic(token, signal, password) {
+  const response = await api.get(`/s/${token}/preview`, {
+    responseType: 'blob',
+    signal,
+    headers: passwordHeaders(password),
+  });
+  return response.data;
+}
+
+export async function downloadPublic(token, name, password) {
+  const response = await api.get(`/s/${token}/download`, {
+    responseType: 'blob',
+    headers: passwordHeaders(password),
+  });
+  saveBlob(response.data, name);
+}

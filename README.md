@@ -299,6 +299,20 @@ docker run --rm --network trustshare_default -v "$PWD/postman:/etc/newman" postm
 
 Run one collection at a time, at least a minute apart: sign-ins are rate-limited to 10 per minute per IP address, and the M3 collection's brute-force test needs its six wrong passwords to reach the server (straight after another run, the limiter answers `429` first and no alert is raised – the protection working, not a failure). Remove the test accounts afterwards with `docker compose exec backend python -m app.scripts.remove_test_accounts postman.example.com`.
 
+## Production Deployment & Backups
+
+For full cloud deployment instructions on AWS EC2 with automatic Let's Encrypt HTTPS and AWS S3 object storage, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Automated database backups
+
+The `deploy/backup.sh` script creates timestamped, compressed dumps of both PostgreSQL and MongoDB in `~/backups/trustshare` and prunes archives older than 14 days.
+
+To run backups automatically every night at 02:00 AM, open crontab (`crontab -e`) on the server and add:
+
+```cron
+0 2 * * * /home/ubuntu/TrustShare/deploy/backup.sh >> /home/ubuntu/backups/trustshare/backup.log 2>&1
+```
+
 ## Environment Variables
 
 See [.env.example](.env.example).

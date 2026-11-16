@@ -1,0 +1,26 @@
+# Production Caddyfile for TrustShare with Let's Encrypt TLS
+# {$DOMAIN} is populated from the environment (.env)
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# Proxy backend API requests
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# Serve built frontend static files with SPA fallback
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,57 @@
+name: trustshare
+
+services:
+  postgres:
+    restart: unless-stopped
+    ports: !reset []
+
+  mongo:
+    restart: unless-stopped
+    ports: !reset []
+
+  redis:
+    restart: unless-stopped
+    ports: !reset []
+
+  # Disabled in production: real AWS S3 is used instead of local RustFS
+  rustfs:
+    profiles:
+      - donotstart
+
+  backend:
+    restart: unless-stopped
+    ports: !reset []
+    volumes: !reset []
+    command: >-
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --proxy-headers --forwarded-allow-ips 172.16.0.0/12"
+    depends_on: !override
+      - postgres
+      - mongo
+      - redis
+
+  # Disabled in production: Vite dev server is replaced by static files inside Caddy
+  frontend:
+    profiles:
+      - donotstart
+
+  # Production ingress: Let's Encrypt TLS + Reverse Proxy + Static SPA file server
+  caddy:
+    build:
+      context: .
+      dockerfile: caddy/Dockerfile.prod
+    image: trustshare-caddy:prod
+    restart: unless-stopped
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes: !override
+      - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: !override
+      - backend
+
+volumes:
+  caddyconfig:

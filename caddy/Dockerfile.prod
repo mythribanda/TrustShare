@@ -1,0 +1,21 @@
+# Multi-stage Dockerfile: build frontend with Vite and serve via Caddy
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Cache package dependencies
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# Copy source and build production bundle
+COPY frontend/ ./
+RUN npm run build
+
+# Production Caddy runtime
+FROM caddy:2.10.2-alpine
+
+# Copy built frontend assets
+COPY --from=builder /app/dist /srv
+
+# Copy production Caddyfile
+COPY caddy/Caddyfile.prod /etc/caddy/Caddyfile

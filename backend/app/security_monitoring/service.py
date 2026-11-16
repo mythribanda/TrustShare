@@ -67,7 +67,9 @@ class SecurityMonitoringService:
             total_events=sum(by_severity.values()),
             open_alerts=await self.events.count_documents({**OPEN, **when}),
             by_severity=by_severity,
-            failed_logins=await self.logs.count_documents({**when, "action": "auth.login.failed"}),
+            failed_logins=await self.logs.count_documents(
+                {**when, "action": {"$in": ["auth.login.failed", "auth.login.locked"]}}
+            ),
             unauthorized_attempts=await self.events.count_documents(
                 {**when, "type": {"$in": UNAUTHORIZED_TYPES}}
             ),

@@ -1,0 +1,44 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.16, pytest-9.1.1, pluggy-1.7.0
+rootdir: /app
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.16.0
+collected 318 items
+
+tests/test_account.py .......                                            [  2%]
+tests/test_account_overview.py ....                                      [  3%]
+tests/test_admin.py ............                                         [  7%]
+tests/test_admin_security.py ................                            [ 12%]
+tests/test_analytics.py ..........                                       [ 15%]
+tests/test_audit_window.py .                                             [ 15%]
+tests/test_auth.py ..........                                            [ 18%]
+tests/test_azure_storage.py sss                                          [ 19%]
+tests/test_bulk_files.py .........                                       [ 22%]
+tests/test_bulk_share.py ......                                          [ 24%]
+tests/test_detection.py .......                                          [ 26%]
+tests/test_email_verification.py ......                                  [ 28%]
+tests/test_encrypted_storage.py ........                                 [ 31%]
+tests/test_encryption.py ..............................                  [ 40%]
+tests/test_end_to_end_m3.py .                                            [ 40%]
+tests/test_files.py .......................                              [ 48%]
+tests/test_folders.py .............                                      [ 52%]
+tests/test_google_login.py ........                                      [ 54%]
+tests/test_health.py ...                                                 [ 55%]
+tests/test_key_rotation.py .......                                       [ 57%]
+tests/test_mfa.py .........                                              [ 60%]
+tests/test_monitoring_audit.py ............                              [ 64%]
+tests/test_new_device_alert.py ...                                       [ 65%]
+tests/test_notifications.py ............                                 [ 69%]
+tests/test_password_reset.py .......                                     [ 71%]
+tests/test_profile.py .........                                          [ 74%]
+tests/test_reports_analytics.py .....                                    [ 75%]
+tests/test_sessions.py ..........                                        [ 78%]
+tests/test_share_access.py .....                                         [ 80%]
+tests/test_share_edit.py .......                                         [ 82%]
+tests/test_share_password_folder.py ........                             [ 85%]
+tests/test_shares.py .........................                           [ 93%]
+tests/test_trash.py .......                                              [ 95%]
+tests/test_vault.py ...............                                      [100%]
+
+================== 315 passed, 3 skipped in 287.84s (0:04:47) ==================

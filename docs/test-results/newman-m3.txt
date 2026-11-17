@@ -1,0 +1,248 @@
+newman
+
+TrustShare – Milestone 3 (monitoring, audit, notifications, detection, reports)
+
+❏ 0 Setup
+↳ Health check
+  GET http://backend:8000/api/health [200 OK, 371B, 118ms]
+  ✓  Status 200
+
+↳ Register user (random email)
+  POST http://backend:8000/api/auth/register [202 Accepted, 426B, 450ms]
+  ✓  Status 202
+
+↳ Register recipient
+  POST http://backend:8000/api/auth/register [202 Accepted, 426B, 397ms]
+  ✓  Status 202
+
+↳ Login user
+  POST http://backend:8000/api/auth/login [200 OK, 1.26kB, 434ms]
+  ✓  Status 200
+
+↳ Login recipient
+  POST http://backend:8000/api/auth/login [200 OK, 1.27kB, 392ms]
+  ✓  Status 200
+
+↳ Login admin (adminEmail / adminPassword from the environment)
+  POST http://backend:8000/api/auth/login [200 OK, 1.3kB, 375ms]
+  ✓  Status 200
+
+↳ User – who am I
+  GET http://backend:8000/api/users/me [200 OK, 696B, 20ms]
+  ✓  Status 200
+
+❏ 1 Activity monitoring
+↳ User uploads a file
+  POST http://backend:8000/api/files [201 Created, 654B, 167ms]
+  ✓  Status 201
+
+↳ User downloads it
+  GET http://backend:8000/api/files/6afb1fc71277399a6bdfc195/download [200 OK, 502B, 45ms]
+  ✓  Status 200
+
+↳ Admin – activity feed for the user
+  GET http://backend:8000/api/activity-monitoring/activities?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 1.42kB, 20ms]
+  ✓  Status 200
+  ✓  Upload recorded with type, file ID and IP
+  ✓  Download and login recorded
+  ✓  No file name shown to the admin
+
+↳ Admin – activity summary
+  GET http://backend:8000/api/activity-monitoring/summary [200 OK, 699B, 18ms]
+  ✓  Status 200
+  ✓  Counts by type
+
+↳ Normal user – activity monitoring refused (403)
+  GET http://backend:8000/api/activity-monitoring/activities [403 Forbidden, 400B, 21ms]
+  ✓  Status 403
+
+❏ 2 Audit logs
+↳ Admin – audit logs of the user
+  GET http://backend:8000/api/audit-logs/user/fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 2.07kB, 21ms]
+  ✓  Status 200
+  ✓  Brief fields present
+  ✓  No file name shown to the admin
+
+↳ Admin – audit logs of the file
+  GET http://backend:8000/api/audit-logs/file/6afb1fc71277399a6bdfc195 [200 OK, 1.19kB, 18ms]
+  ✓  Status 200
+  ✓  Upload and download of this file
+
+↳ Admin – filter: downloads of the user today
+  GET http://backend:8000/api/audit-logs/filter?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9&activity_type=download&status=success [200 OK, 755B, 24ms]
+  ✓  Status 200
+  ✓  Only downloads
+
+↳ Admin – verify the hash chain
+  GET http://backend:8000/api/audit-logs/verify [200 OK, 362B, 30ms]
+  ✓  Status 200
+  ✓  Chain intact
+
+↳ Normal user – audit logs refused (403)
+  GET http://backend:8000/api/audit-logs [403 Forbidden, 400B, 24ms]
+  ✓  Status 403
+
+❏ 3 Notifications
+↳ User shares the file with the recipient
+  POST http://backend:8000/api/files/6afb1fc71277399a6bdfc195/shares [201 Created, 727B, 54ms]
+  ✓  Status 201
+
+↳ Recipient – notification about the share
+  GET http://backend:8000/api/notifications [200 OK, 757B, 19ms]
+  ✓  Status 200
+  ✓  file_shared notification
+  ✓  Unread
+
+↳ Recipient – downloads through the share
+  GET http://backend:8000/api/shares/9c0a9d7d-f2ec-4869-ae06-dd0af4155915/download [200 OK, 502B, 56ms]
+  ✓  Status 200
+
+↳ User – notified about the download
+  GET http://backend:8000/api/notifications?type=file_downloaded [200 OK, 759B, 16ms]
+  ✓  Status 200
+  ✓  Download notice with time
+
+↳ Recipient – mark all read
+  POST http://backend:8000/api/notifications/read-all [200 OK, 297B, 17ms]
+  ✓  Status 200
+  ✓  Marked
+
+↳ Recipient – email preferences: turn download notices on
+  PUT http://backend:8000/api/notifications/preferences [200 OK, 801B, 15ms]
+  ✓  Status 200
+  ✓  Saved
+
+❏ 4 Suspicious activity detection
+↳ Wrong password 1 (recipient)
+  POST http://backend:8000/api/auth/login [401 Unauthorized, 402B, 353ms]
+  ✓  Refused
+
+↳ Wrong password 2 (recipient)
+  POST http://backend:8000/api/auth/login [401 Unauthorized, 402B, 331ms]
+  ✓  Refused
+
+↳ Wrong password 3 (recipient)
+  POST http://backend:8000/api/auth/login [401 Unauthorized, 402B, 333ms]
+  ✓  Refused
+
+↳ Wrong password 4 (recipient)
+  POST http://backend:8000/api/auth/login [401 Unauthorized, 402B, 324ms]
+  ✓  Refused
+
+↳ Wrong password 5 (recipient)
+  POST http://backend:8000/api/auth/login [401 Unauthorized, 402B, 364ms]
+  ✓  Refused
+
+↳ Wrong password 6 (recipient)
+  POST http://backend:8000/api/auth/login [429 Too Many Requests, 446B, 50ms]
+  ✓  Refused
+
+↳ Admin – brute-force alert raised (high)
+  GET http://backend:8000/api/security-monitoring/events?user=m3-recipient-1794842565440@postman.example.com&type=repeated_failed_logins [200 OK, 1.06kB, 16ms]
+  ✓  Status 200
+  ✓  One high alert, status open
+
+↳ Admin – acknowledge the alert
+  PATCH http://backend:8000/api/security-monitoring/events/6afb1fca1277399a6bdfc1b6 [200 OK, 1.08kB, 25ms]
+  ✓  Status 200
+  ✓  Acknowledged
+
+↳ Admin – resolve with a note
+  PATCH http://backend:8000/api/security-monitoring/events/6afb1fca1277399a6bdfc1b6 [200 OK, 1.16kB, 23ms]
+  ✓  Status 200
+  ✓  Resolved with note
+
+↳ Admin – detection rules
+  GET http://backend:8000/api/security-monitoring/rules [200 OK, 1.56kB, 12ms]
+  ✓  Status 200
+  ✓  The 5 rules
+
+↳ Admin – security monitoring summary
+  GET http://backend:8000/api/security-monitoring/summary [200 OK, 6.27kB, 53ms]
+  ✓  Status 200
+  ✓  Failed logins counted
+
+↳ Admin – security alert notification
+  GET http://backend:8000/api/notifications?type=security_alert [200 OK, 4.2kB, 26ms]
+  ✓  Status 200
+  ✓  Admin was alerted
+
+❏ 5 Reports & storage analytics
+↳ Admin – upload report
+  GET http://backend:8000/api/reports/uploads?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 2.69kB, 27ms]
+  ✓  Status 200
+  ✓  1 upload
+  ✓  No file name shown to the admin
+
+↳ Admin – download report
+  GET http://backend:8000/api/reports/downloads?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 2.85kB, 38ms]
+  ✓  Status 200
+  ✓  Own download counted
+
+↳ Admin – sharing report
+  GET http://backend:8000/api/reports/sharing?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 2.77kB, 29ms]
+  ✓  Status 200
+  ✓  1 direct share
+
+↳ Admin – user activity report
+  GET http://backend:8000/api/reports/users/fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 3.78kB, 25ms]
+  ✓  Status 200
+  ✓  Has activities
+  ✓  No file name shown to the admin
+
+↳ Admin – security report as CSV
+  GET http://backend:8000/api/reports/security?format=csv [200 OK, 2.78kB, 27ms]
+  ✓  Status 200
+  ✓  CSV
+
+↳ Admin – storage analytics for the user
+  GET http://backend:8000/api/analytics/storage?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 774B, 30ms]
+  ✓  Status 200
+  ✓  1 file, real size
+
+↳ Admin – user-wise storage
+  GET http://backend:8000/api/analytics/users/storage [200 OK, 1.13kB, 30ms]
+  ✓  Status 200
+  ✓  Users listed
+
+↳ Admin – file statistics
+  GET http://backend:8000/api/analytics/files?user_id=fcec769d-8ae1-4505-a9f8-9a00b123afc9 [200 OK, 3.54kB, 49ms]
+  ✓  Status 200
+  ✓  Uploads by day
+
+↳ Admin – download statistics
+  GET http://backend:8000/api/analytics/downloads [200 OK, 3.06kB, 36ms]
+  ✓  Status 200
+
+↳ Admin – sharing statistics
+  GET http://backend:8000/api/analytics/sharing [200 OK, 2.07kB, 29ms]
+  ✓  Status 200
+
+↳ Normal user – reports refused (403)
+  GET http://backend:8000/api/reports/uploads [403 Forbidden, 400B, 23ms]
+  ✓  Status 403
+
+❏ 6 Clean-up
+↳ Delete the file forever
+  DELETE http://backend:8000/api/files/6afb1fc71277399a6bdfc195 [204 No Content, 272B, 96ms]
+  ✓  Status 204
+
+┌─────────────────────────┬────────────────────┬────────────────────┐
+│                         │           executed │             failed │
+├─────────────────────────┼────────────────────┼────────────────────┤
+│              iterations │                  1 │                  0 │
+├─────────────────────────┼────────────────────┼────────────────────┤
+│                requests │                 47 │                  0 │
+├─────────────────────────┼────────────────────┼────────────────────┤
+│            test-scripts │                 47 │                  0 │
+├─────────────────────────┼────────────────────┼────────────────────┤
+│      prerequest-scripts │                  2 │                  0 │
+├─────────────────────────┼────────────────────┼────────────────────┤
+│              assertions │                 77 │                  0 │
+├─────────────────────────┴────────────────────┴────────────────────┤
+│ total run duration: 6.3s                                          │
+├───────────────────────────────────────────────────────────────────┤
+│ total data received: 47.71kB (approx)                             │
+├───────────────────────────────────────────────────────────────────┤
+│ average response time: 108ms [min: 12ms, max: 450ms, s.d.: 142ms] │
+└───────────────────────────────────────────────────────────────────┘

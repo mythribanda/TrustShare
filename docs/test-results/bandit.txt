@@ -1,0 +1,153 @@
+Working... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:02
+Run started:2026-11-16 15:40:18.475411+00:00
+
+Test results:
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'An old session token was used again, so every session was ended. Sign in again and change your password if you didn't expect this.'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/notifications/triggers.py:58:4
+57	    "If this wasn't you, change your password and turn on two-step verification.",
+58	    "token_reuse": "An old session token was used again, so every session was ended. "
+59	    "Sign in again and change your password if you didn't expect this.",
+60	    "vault_locked": "Too many wrong vault passwords – your vault is locked for 15 minutes.",
+61	}
+62	
+63	
+64	def _service() -> NotificationService:
+65	    return NotificationService(get_mongo(), get_redis())
+66	
+67	
+68	def _app_link(path: str) -> str:
+69	    return f"{get_settings().frontend_url}{path}"
+70	
+71	
+72	# ---------- activity hook ----------
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'Password-reset links (hashed, 15 min, single use)'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/scripts/redis_overview.py:23:4
+22	    "mfa_setup": "Two-step verification being set up (10 min)",
+23	    "pwd_reset": "Password-reset links (hashed, 15 min, single use)",
+24	    "pwd_reset_user": "Latest reset link per user",
+25	    "email_verify": "Email-verification links (hashed, 24 h, single use)",
+26	    "email_verify_user": "Latest verification link per user",
+27	    "oauth_state": "Google logins in progress (10 min)",
+28	    "login_fail": "Failed-login counters",
+29	    "lockout": "Locked accounts (15 min after 5 wrong passwords)",
+30	    "rl": "Rate-limit counters per IP (1 minute)",
+31	}
+32	
+33	
+34	def human(seconds: int) -> str:
+35	    if seconds < 0:
+36	        return "no expiry"
+37	    if seconds < 120:
+38	        return f"{seconds} s"
+39	    if seconds < 7200:
+40	        return f"{seconds // 60} min"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'Latest reset link per user'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/scripts/redis_overview.py:24:4
+23	    "pwd_reset": "Password-reset links (hashed, 15 min, single use)",
+24	    "pwd_reset_user": "Latest reset link per user",
+25	    "email_verify": "Email-verification links (hashed, 24 h, single use)",
+26	    "email_verify_user": "Latest verification link per user",
+27	    "oauth_state": "Google logins in progress (10 min)",
+28	    "login_fail": "Failed-login counters",
+29	    "lockout": "Locked accounts (15 min after 5 wrong passwords)",
+30	    "rl": "Rate-limit counters per IP (1 minute)",
+31	}
+32	
+33	
+34	def human(seconds: int) -> str:
+35	    if seconds < 0:
+36	        return "no expiry"
+37	    if seconds < 120:
+38	        return f"{seconds} s"
+39	    if seconds < 7200:
+40	        return f"{seconds // 60} min"
+41	    if seconds < 172800:
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'https://oauth2.googleapis.com/token'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/google_oauth_service.py:48:19
+47	GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+48	GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 – a public URL, not a secret
+49	GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'wrong password'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/share_service.py:77:4
+76	    "SHARE_NOT_FOUND": "file no longer available",
+77	    "SHARE_PASSWORD_INVALID": "wrong password",
+78	    "SHARE_PASSWORD_LOCKED": "too many wrong passwords",
+79	}
+80	# Header name, not a secret. URL-encoded, so any characters work in a header.
+81	PASSWORD_HEADER = "X-Share-Password"  # noqa: S105
+82	PASSWORD_MAX_TRIES = 5  # wrong passwords per link and visitor IP …
+83	PASSWORD_LOCK_SECONDS = 15 * 60  # … then that visitor is locked out of the link for 15 minutes
+84	FOLDER_SHARE_MAX_FILES = 50
+85	LINK_OPEN_THROTTLE_SECONDS = 300  # a reload within 5 minutes isn't a new visit
+86	
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'too many wrong passwords'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/share_service.py:78:4
+77	    "SHARE_PASSWORD_INVALID": "wrong password",
+78	    "SHARE_PASSWORD_LOCKED": "too many wrong passwords",
+79	}
+80	# Header name, not a secret. URL-encoded, so any characters work in a header.
+81	PASSWORD_HEADER = "X-Share-Password"  # noqa: S105
+82	PASSWORD_MAX_TRIES = 5  # wrong passwords per link and visitor IP …
+83	PASSWORD_LOCK_SECONDS = 15 * 60  # … then that visitor is locked out of the link for 15 minutes
+84	FOLDER_SHARE_MAX_FILES = 50
+85	LINK_OPEN_THROTTLE_SECONDS = 300  # a reload within 5 minutes isn't a new visit
+86	
+87	
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'X-Share-Password'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/share_service.py:81:18
+80	# Header name, not a secret. URL-encoded, so any characters work in a header.
+81	PASSWORD_HEADER = "X-Share-Password"  # noqa: S105
+82	PASSWORD_MAX_TRIES = 5  # wrong passwords per link and visitor IP …
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 12746
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 1
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 7
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 7
+		High: 0
+Files skipped (0):

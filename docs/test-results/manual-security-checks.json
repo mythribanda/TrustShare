@@ -1,0 +1,128 @@
+[
+  {
+    "test": "SQL Injection (Login Input)",
+    "method": "POST /api/auth/login",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\": \"admin'\"'\"' OR 1=1 --@sec.example.com\", \"password\": \"wrong\"}'",
+    "expected": "HTTP 401 (INVALID_CREDENTIALS) or 422, parameterized SQL prevents authentication bypass",
+    "actual": "HTTP 422 - {'error': {'code': 'VALIDATION_ERROR', 'message': 'Some fields are invalid.', 'request_id': 'a59d7b590cf6', 'details': [{'field': 'email', 'message': 'value is not a valid email address: The email address contains invalid characters before the @-sign: SPACE.'}]}}",
+    "passed": true,
+    "details": "SQL query is fully parameterized in SQLAlchemy; malicious injection is treated as raw string."
+  },
+  {
+    "test": "SQL/NoSQL Injection (Search Input)",
+    "method": "GET /api/files?q=' OR 1=1 --",
+    "curl": "curl -s -i -X GET \"http://localhost:8000/api/files?q=%27%20OR%201=1%20--\" -H \"Authorization: Bearer <token>\"",
+    "expected": "HTTP 200 with empty list [], no records leaked, literal match sought",
+    "actual": "HTTP 200 - items=0",
+    "passed": true,
+    "details": "MongoDB query escapes search string with re.escape and queries literally without operator injection."
+  },
+  {
+    "test": "Stored XSS (Folder Names)",
+    "method": "POST /api/folders",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/folders -H \"Authorization: Bearer <token>\" -H \"Content-Type: application/json\" -d '{\"name\": \"<script>alert('xss')</script>\"}'",
+    "expected": "HTTP 400 rejection (INVALID_NAME) or safe JSON with nosniff header",
+    "actual": "HTTP 400 - {'error': {'code': 'INVALID_NAME', 'message': \"Folder names can't be empty or contain / or \\\\.\", 'request_id': 'bf9f8d54e447'}}",
+    "passed": true,
+    "details": "Folder names validated/sanitized via clean_folder_name and served strictly as JSON with nosniff headers. React escapes text nodes."
+  },
+  {
+    "test": "Stored XSS (File Names)",
+    "method": "POST /api/files",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/files?allow_duplicate=true -H \"Authorization: Bearer <token>\" -F \"file=@<script>alert(1)</script>.pdf\"",
+    "expected": "HTTP 201 - name safely sanitized, stored and served in JSON with nosniff; Content-Disposition attachment",
+    "actual": "HTTP 201 - file_id=6afb23a6e5c01300a9a6c766, stored_name=script>.pdf",
+    "passed": true,
+    "details": "File name is sanitized with clean_filename; dangerous characters stripped; frontend React components render strictly via textContent."
+  },
+  {
+    "test": "IDOR (File Download / Access)",
+    "method": "GET /api/files/6afb23a6e5c01300a9a6c763/download",
+    "curl": "curl -s -i -X GET http://localhost:8000/api/files/6afb23a6e5c01300a9a6c763/download -H \"Authorization: Bearer <user_b_token>\"",
+    "expected": "HTTP 404 (FILE_NOT_FOUND) - zero information disclosure",
+    "actual": "HTTP 404 - {'error': {'code': 'FILE_NOT_FOUND', 'message': 'File not found.', 'request_id': '1dc04552c9a5'}}",
+    "passed": true,
+    "details": "FileService.owned checks doc['owner_id'] == str(user.id) and returns 404 to avoid confirming file existence."
+  },
+  {
+    "test": "IDOR (Share Revocation / Access)",
+    "method": "DELETE /api/shares/07f9f4a0-af9b-434a-99f6-97e816aac057",
+    "curl": "curl -s -i -X DELETE http://localhost:8000/api/shares/07f9f4a0-af9b-434a-99f6-97e816aac057 -H \"Authorization: Bearer <user_b_token>\"",
+    "expected": "HTTP 404 (SHARE_NOT_FOUND) - User B cannot revoke or access User A's share",
+    "actual": "HTTP 404 - {'error': {'code': 'SHARE_NOT_FOUND', 'message': 'This share link is invalid or no longer available.', 'request_id': '5a6ca1367a1f'}}",
+    "passed": true,
+    "details": "ShareService checks share.created_by == user.id before permitting any modification."
+  },
+  {
+    "test": "Expired Share Link Handling",
+    "method": "GET /api/s/ILZX6BwsnCVOAx6-oBVmrwcSpqkdQbsfQw3J8Zk8Fck",
+    "curl": "curl -s -i -X GET http://localhost:8000/api/s/ILZX6BwsnCVOAx6-oBVmrwcSpqkdQbsfQw3J8Zk8Fck",
+    "expected": "HTTP 410 (SHARE_EXPIRED) - Expired links are immediately rejected",
+    "actual": "HTTP 410 - {'error': {'code': 'SHARE_EXPIRED', 'message': 'This share has expired.', 'request_id': '2996a8151b4b'}}",
+    "passed": true,
+    "details": "Share verification compares current UTC timestamp against share.expires_at, returning 410 Gone."
+  },
+  {
+    "test": "Revoked Share Link Handling",
+    "method": "GET /api/s/UCZXolDb0ghOhpOFXlT_xK8r3gswFag1Nxz-omnWWL0",
+    "curl": "curl -s -i -X GET http://localhost:8000/api/s/UCZXolDb0ghOhpOFXlT_xK8r3gswFag1Nxz-omnWWL0",
+    "expected": "HTTP 410 (SHARE_REVOKED) - Revoked links are immediately deactivated",
+    "actual": "HTTP 410 - {'error': {'code': 'SHARE_REVOKED', 'message': 'The owner has revoked this share.', 'request_id': 'f879752c5367'}}",
+    "passed": true,
+    "details": "Revocation marks status as 'revoked' in PostgreSQL/Redis; resolution returns 410 Gone."
+  },
+  {
+    "test": "Brute-Force Login Lockout",
+    "method": "POST /api/auth/login (after 5 failures)",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\": \"sec_lockout_target@sec.example.com\", \"password\": \"WrongPassword!\"}' (6th attempt)",
+    "expected": "HTTP 429 (ACCOUNT_LOCKED) - Account locked for 15 minutes after 5 failures",
+    "actual": "HTTP 429 - {'error': {'code': 'ACCOUNT_LOCKED', 'message': 'Too many failed attempts. Try again in 15 minute(s).', 'request_id': 'f8d8573c9dff'}}",
+    "passed": true,
+    "details": "Redis key lockout:{email} is set with 15-minute TTL upon the 5th consecutive failure."
+  },
+  {
+    "test": "JWT Signature Tampering Rejection",
+    "method": "GET /api/users/me (tampered JWT)",
+    "curl": "curl -s -i -X GET http://localhost:8000/api/users/me -H \"Authorization: Bearer <tampered_jwt>\"",
+    "expected": "HTTP 401 (INVALID_TOKEN) - Modified signature rejected immediately",
+    "actual": "HTTP 401 - {'error': {'code': 'INVALID_TOKEN', 'message': 'Your session is invalid or has expired.', 'request_id': '66660f79ae07'}}",
+    "passed": true,
+    "details": "HMAC-SHA256 signature verification fails cryptographic check in AuthMiddleware / get_current_user."
+  },
+  {
+    "test": "S3/Object Storage Ciphertext Verification",
+    "method": "Direct read of raw S3 object: 88d938d2-bf58-4c89-b851-a8a8a00b6210/06edbad6-159b-424d-bd0a-4aa6a8af5319",
+    "curl": "curl -s -i http://localhost:9000/trustshare-files/88d938d2-bf58-4c89-b851-a8a8a00b6210/06edbad6-159b-424d-bd0a-4aa6a8af5319",
+    "expected": "Raw object starts with magic TSE1\\x01, plaintext secret is completely absent from storage bytes",
+    "actual": "Magic=b'TSE1\\x01\\x00\\x10\\x00', Length=116, Plaintext Found=False",
+    "passed": true,
+    "details": "AES-256-GCM envelope encryption encrypts file prior to S3 upload. Raw S3 data is authenticated ciphertext."
+  },
+  {
+    "test": "File Validation (Unsupported Extension)",
+    "method": "POST /api/files (malware.sh)",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/files?allow_duplicate=true -H \"Authorization: Bearer <token>\" -F \"file=@malware.sh\"",
+    "expected": "HTTP 415 (UNSUPPORTED_FILE_TYPE) - Non-whitelisted extension rejected",
+    "actual": "HTTP 415 - {'error': {'code': 'UNSUPPORTED_FILE_TYPE', 'message': 'This file type is not allowed. Allowed: PDF, DOCX, XLSX, PPTX, TXT, CSV, PNG, JPG.', 'request_id': '19d6a0430bd7'}}",
+    "passed": true,
+    "details": "Extension whitelist enforces PDF, DOCX, XLSX, PPTX, TXT, CSV, PNG, JPG only."
+  },
+  {
+    "test": "File Validation (Magic Bytes Content Mismatch)",
+    "method": "POST /api/files (fake_doc.pdf containing PE header)",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/files?allow_duplicate=true -H \"Authorization: Bearer <token>\" -F \"file=@fake_doc.pdf\"",
+    "expected": "HTTP 415 (FILE_CONTENT_MISMATCH) - Disguised binary rejected by magic byte inspection",
+    "actual": "HTTP 415 - {'error': {'code': 'UNSUPPORTED_FILE_TYPE', 'message': \"The file's content does not match its extension.\", 'request_id': '81fc779e506f'}}",
+    "passed": true,
+    "details": "content_matches inspects initial bytes (%PDF- required); mismatches rejected with 415."
+  },
+  {
+    "test": "File Validation (Size Limit 25 MB)",
+    "method": "POST /api/files (>25 MB payload)",
+    "curl": "curl -s -i -X POST http://localhost:8000/api/files?allow_duplicate=true -H \"Authorization: Bearer <token>\" -F \"file=@oversized_26mb.pdf\"",
+    "expected": "HTTP 413 (FILE_TOO_LARGE) - Uploads exceeding 25 MB rejected",
+    "actual": "HTTP 413 - {'error': {'code': 'FILE_TOO_LARGE', 'message': 'File exceeds the 25 MB limit.', 'request_id': '2ff03e6f86ad'}}",
+    "passed": true,
+    "details": "Stream chunk counter enforces MAX_FILE_SIZE (25 * 1024 * 1024) and aborts stream with 413."
+  }
+]

@@ -1,0 +1,168 @@
+newman
+
+TrustShare – Milestone 2 (encryption, sharing, access control)
+
+❏ 0 Setup
+↳ Health check – databases and storage
+  GET http://backend:8000/api/health [200 OK, 371B, 118ms]
+  ✓  Status 200
+  ✓  All services ok (incl. object storage)
+
+↳ Register owner (random email)
+  POST http://backend:8000/api/auth/register [202 Accepted, 426B, 402ms]
+  ✓  Status 202
+
+↳ Login owner
+  POST http://backend:8000/api/auth/login [200 OK, 1.26kB, 363ms]
+  ✓  Status 200
+
+↳ Register stranger
+  POST http://backend:8000/api/auth/register [202 Accepted, 426B, 324ms]
+  ✓  Status 202
+
+↳ Login stranger
+  POST http://backend:8000/api/auth/login [200 OK, 1.26kB, 321ms]
+  ✓  Status 200
+
+❏ 1 Encrypted upload & download
+↳ Upload – encrypted with its own AES-256-GCM key
+  POST http://backend:8000/api/files [201 Created, 654B, 158ms]
+  ✓  Status 201
+  ✓  No storage location or key material in the response
+
+↳ Upload – disguised program rejected (content check)
+  POST http://backend:8000/api/files [415 Unsupported Media Type, 436B, 79ms]
+  ✓  Status 415
+  ✓  Error code UNSUPPORTED_FILE_TYPE
+
+↳ Download – owner gets the decrypted original
+  GET http://backend:8000/api/files/6afb1f661277399a6bdfc15e/download [200 OK, 502B, 46ms]
+  ✓  Status 200
+  ✓  Decrypted PDF
+  ✓  Saved as attachment
+
+↳ Download – another user is denied (404, nothing revealed)
+  GET http://backend:8000/api/files/6afb1f661277399a6bdfc15e/download [404 Not Found, 382B, 45ms]
+  ✓  Status 404
+  ✓  Error code FILE_NOT_FOUND
+
+↳ Download – no login (401)
+  GET http://backend:8000/api/files/6afb1f661277399a6bdfc15e/download [401 Unauthorized, 413B, 11ms]
+  ✓  Status 401
+
+❏ 2 Share links
+↳ Create link – view only, expires in 1 day
+  POST http://backend:8000/api/files/6afb1f661277399a6bdfc15e/shares [201 Created, 754B, 48ms]
+  ✓  Status 201
+  ✓  Link returned once
+
+↳ Public – link details (no account)
+  GET http://backend:8000/api/s/dRFUWBx8FtdI8CHvB0-5-k2NRurnCtCFSmpjsVafbBQ [200 OK, 538B, 48ms]
+  ✓  Status 200
+  ✓  View permission
+
+↳ Public – preview works
+  GET http://backend:8000/api/s/dRFUWBx8FtdI8CHvB0-5-k2NRurnCtCFSmpjsVafbBQ/preview [200 OK, 568B, 51ms]
+  ✓  Status 200
+
+↳ Public – download refused on a view-only link
+  GET http://backend:8000/api/s/dRFUWBx8FtdI8CHvB0-5-k2NRurnCtCFSmpjsVafbBQ/download [403 Forbidden, 441B, 33ms]
+  ✓  Status 403
+  ✓  Error code SHARE_DOWNLOAD_NOT_ALLOWED
+
+↳ Create link – download, limit 1
+  POST http://backend:8000/api/files/6afb1f661277399a6bdfc15e/shares [201 Created, 755B, 35ms]
+  ✓  Status 201
+  ✓  Link returned once
+
+↳ Public – first download allowed
+  GET http://backend:8000/api/s/KrLkAlagNl4M2yi8FWTP6pfTp36gtR8lG47R84CxLaY/download [200 OK, 502B, 53ms]
+  ✓  Status 200
+
+↳ Public – second download refused (limit reached)
+  GET http://backend:8000/api/s/KrLkAlagNl4M2yi8FWTP6pfTp36gtR8lG47R84CxLaY/download [410 Gone, 410B, 30ms]
+  ✓  Status 410
+  ✓  Error code SHARE_LIMIT_REACHED
+
+↳ Revoke the view link
+  DELETE http://backend:8000/api/shares/99cf72ae-b908-4b4e-b7c6-b55cf10da97c [204 No Content, 272B, 39ms]
+  ✓  Status 204
+
+↳ Public – revoked link refused
+  GET http://backend:8000/api/s/dRFUWBx8FtdI8CHvB0-5-k2NRurnCtCFSmpjsVafbBQ [410 Gone, 395B, 25ms]
+  ✓  Status 410
+  ✓  Error code SHARE_REVOKED
+
+↳ Create link – expiry beyond 30 days refused
+  POST http://backend:8000/api/files/6afb1f661277399a6bdfc15e/shares [400 Bad Request, 409B, 33ms]
+  ✓  Status 400
+  ✓  Error code INVALID_EXPIRY
+
+↳ Public – unknown link (404)
+  GET http://backend:8000/api/s/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA [404 Not Found, 419B, 30ms]
+  ✓  Status 404
+  ✓  Error code SHARE_NOT_FOUND
+
+❏ 3 Direct sharing
+↳ Share directly with the stranger (download)
+  POST http://backend:8000/api/files/6afb1f661277399a6bdfc15e/shares [201 Created, 722B, 86ms]
+  ✓  Status 201
+  ✓  No link for direct shares
+
+↳ Stranger – Shared with me
+  GET http://backend:8000/api/shares/received [200 OK, 686B, 61ms]
+  ✓  Status 200
+  ✓  File is listed
+
+↳ Stranger – download through the share
+  GET http://backend:8000/api/shares/92270155-6a2a-472f-a75a-c8199378d8e1/download [200 OK, 502B, 79ms]
+  ✓  Status 200
+
+↳ Owner – Shared by me shows every share with status
+  GET http://backend:8000/api/shares/sent [200 OK, 1.58kB, 70ms]
+  ✓  Status 200
+  ✓  Revoked and used-up shares are reported
+
+❏ 4 Access control & analytics
+↳ Normal user – admin Security Dashboard refused (403)
+  GET http://backend:8000/api/admin/security/overview [403 Forbidden, 400B, 56ms]
+  ✓  Status 403
+  ✓  Error code FORBIDDEN
+
+↳ Normal user – admin audit log refused (403)
+  GET http://backend:8000/api/admin/audit [403 Forbidden, 400B, 29ms]
+  ✓  Status 403
+
+↳ Owner – File Analytics
+  GET http://backend:8000/api/analytics/me?tz=UTC [200 OK, 7.52kB, 81ms]
+  ✓  Status 200
+  ✓  Upload, downloads and shares counted
+
+❏ 5 Clean-up
+↳ Delete forever – object, key and shares removed
+  DELETE http://backend:8000/api/files/6afb1f661277399a6bdfc15e [204 No Content, 272B, 104ms]
+  ✓  Status 204
+
+↳ Public – link of a deleted file (404)
+  GET http://backend:8000/api/s/KrLkAlagNl4M2yi8FWTP6pfTp36gtR8lG47R84CxLaY [404 Not Found, 419B, 25ms]
+  ✓  Status 404
+
+┌─────────────────────────┬────────────────────┬───────────────────┐
+│                         │           executed │            failed │
+├─────────────────────────┼────────────────────┼───────────────────┤
+│              iterations │                  1 │                 0 │
+├─────────────────────────┼────────────────────┼───────────────────┤
+│                requests │                 30 │                 0 │
+├─────────────────────────┼────────────────────┼───────────────────┤
+│            test-scripts │                 30 │                 0 │
+├─────────────────────────┼────────────────────┼───────────────────┤
+│      prerequest-scripts │                  5 │                 0 │
+├─────────────────────────┼────────────────────┼───────────────────┤
+│              assertions │                 49 │                 0 │
+├─────────────────────────┴────────────────────┴───────────────────┤
+│ total run duration: 3.9s                                         │
+├──────────────────────────────────────────────────────────────────┤
+│ total data received: 14.67kB (approx)                            │
+├──────────────────────────────────────────────────────────────────┤
+│ average response time: 96ms [min: 11ms, max: 402ms, s.d.: 105ms] │
+└──────────────────────────────────────────────────────────────────┘

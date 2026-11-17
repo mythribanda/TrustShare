@@ -83,9 +83,9 @@ class GoogleClient:
                 "code_verifier": code_verifier,
             }
         ).encode()
-        # S310 warns about opening arbitrary URLs; this one is a fixed https address.
-        request = urllib.request.Request(GOOGLE_TOKEN_URL, data=body, method="POST")  # noqa: S310
-        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+        # S310/B310 warns about opening arbitrary URLs; this one is a fixed https address.
+        request = urllib.request.Request(GOOGLE_TOKEN_URL, data=body, method="POST")  # nosec B310 # noqa: S310
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310 # noqa: S310
             return json.loads(response.read())
 
     def _verify(self, id_token: str) -> dict[str, Any]:

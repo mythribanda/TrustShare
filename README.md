@@ -7,11 +7,21 @@ A secure file-sharing and document management platform – a private alternative
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
 ![React](https://img.shields.io/badge/frontend-React_%2B_Vite-61DAFB)
-![Status](https://img.shields.io/badge/milestone_3-complete-2ea44f)
+![Status](https://img.shields.io/badge/milestone_4-complete-2ea44f)
+
+## Live Deployment
+
+- **Live URL:** [https://trustshare.duckdns.org](https://trustshare.duckdns.org) *(Configured for AWS EC2 Ubuntu 22.04 with automatic Let's Encrypt HTTPS and AWS S3 storage; see [DEPLOYMENT.md](DEPLOYMENT.md))*
+- **Local HTTPS:** [https://localhost:8443](https://localhost:8443) (TLS 1.3 via local Caddy)
+- **Local API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Status
 
-TrustShare is built milestone by milestone. **Milestone 1** (foundation: auth, RBAC, MFA, upload, dashboard) **Milestone 2** (encryption, cloud storage, secure sharing, key management, dashboards, HTTPS) and **Milestone 3** (activity monitoring, audit logs, notifications, reports, storage analytics, suspicious-activity detection) are complete. After Milestone 3 the existing features were polished: multi-select with ZIP download, sharing several files or a whole folder, optional link passwords, QR codes, editable shares with access history, desktop pop-ups, light/dark mode, a separate admin console look and an account security score. **Milestone 4** (security testing, cloud deployment, final documentation) is next.
+TrustShare is developed milestone by milestone. All four milestones are complete:
+- **Milestone 1:** Foundation (auth, RBAC, MFA, upload, file dashboard, CI).
+- **Milestone 2:** AES-256-GCM envelope encryption, S3-compatible cloud storage, secure links and direct sharing, key rotation, user analytics, admin security dashboard, HTTPS.
+- **Milestone 3:** Unified activity monitoring, tamper-evident hash-chained audit logs, real-time SSE + email notifications, security alerts, reports, storage analytics, rule-based suspicious-activity detection, unified dark admin console.
+- **Milestone 4:** Comprehensive security testing (SAST with Bandit, dependency audits with pip-audit and npm audit, 14 manual defensive penetration checks), cloud deployment automation (AWS EC2 + S3 + Caddy production compose override + setup scripts + CI/CD deploy workflow), end-user guide, administrator guide, and test reports.
 
 ## Features
 
@@ -104,6 +114,26 @@ New code lives in feature modules named like the brief: `activity_monitoring/`, 
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    Client["Client Browser"]
+    Caddy["Caddy Reverse Proxy (TLS 1.3)\n:80, :443, :8443"]
+    Frontend["React + Vite SPA"]
+    Backend["FastAPI Backend (Uvicorn)"]
+    S3["Private Object Storage (AWS S3 / RustFS)\n[Ciphertext Only - AES-256-GCM]"]
+    PG[("PostgreSQL 16\n(Users, Roles, Wrapped DEKs, Shares)")]
+    Mongo[("MongoDB 7\n(File Metadata, Hash-Chained Audit Logs, Activities)")]
+    Redis[("Redis 7\n(Sessions, Refresh Tokens, Lockout, Rate Limits)")]
+
+    Client -->|HTTPS| Caddy
+    Caddy -->|Static Files / SPA Fallback| Frontend
+    Caddy -->|/api/* Proxy| Backend
+    Backend -->|AES-256-GCM Chunks| S3
+    Backend --> PG
+    Backend --> Mongo
+    Backend --> Redis
+```
+
 ```
 Browser ──HTTPS──> Caddy ──> React + Vite (UI)
                      └─/api─> FastAPI backend ──encrypt / decrypt (AES-256-GCM)──> Object storage
@@ -118,7 +148,16 @@ Browser ──HTTPS──> Caddy ──> React + Vite (UI)
 
 Each database is used for what it is good at: PostgreSQL for consistent relational data, MongoDB for flexible, high-volume documents, Redis for fast data that expires on its own. The backend is layered – **routes → services → repositories** – so HTTP handling, business rules and data access stay separate.
 
-Full design with diagrams: [docs/architecture.md](docs/architecture.md) · data model: [docs/database.md](docs/database.md) · requirements and permission matrix: [docs/requirements.md](docs/requirements.md) · wireframes: [docs/wireframes.html](docs/wireframes.html).
+### Comprehensive Documentation
+- **Architecture & Design:** [docs/architecture.md](docs/architecture.md)
+- **Database Schema:** [docs/database.md](docs/database.md)
+- **Key Management & Envelope Encryption:** [docs/key-management.md](docs/key-management.md)
+- **Requirements Matrix:** [docs/requirements.md](docs/requirements.md)
+- **Wireframes:** [docs/wireframes.html](docs/wireframes.html)
+- **End-User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+- **Administrator Guide:** [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)
+- **Security Test Report:** [docs/SECURITY_TEST_REPORT.md](docs/SECURITY_TEST_REPORT.md)
+- **Cloud Deployment Guide:** [DEPLOYMENT.md](DEPLOYMENT.md)
 
 **Encryption workflow (implemented in Milestone 2)**
 
@@ -138,8 +177,27 @@ Full design with diagrams: [docs/architecture.md](docs/architecture.md) · data 
 | Frontend | React 19, Vite, React Router, Tailwind CSS, Axios, Recharts, qrcode (loaded on demand), lucide-react, sonner |
 | Data & storage | PostgreSQL 16, MongoDB 7, Redis 7, object storage: Azure Blob Storage (azure-storage-blob) or S3 API via boto3 (RustFS locally / AWS S3) |
 | Security | AES-256-GCM (`cryptography`), envelope encryption with versioned master keys, bcrypt, JWT, TOTP (pyotp), Fernet, permission-based RBAC, Caddy (TLS) |
-| Quality | pytest (318 tests), Postman/Newman collections (M2 + M3), ruff, ESLint, Prettier, pre-commit, GitHub Actions |
-| Deployment | Docker, Docker Compose (7 services incl. RustFS and Caddy) |
+| Quality | pytest (318 tests), Postman/Newman collections (M2 + M3), Bandit SAST, pip-audit, npm audit, ruff, ESLint, Prettier, pre-commit, GitHub Actions |
+| Deployment | Docker, Docker Compose (local 7 services & prod override), AWS EC2, Caddy, AWS S3, GitHub Actions SSH deploy |
+
+## Screenshots
+
+TrustShare features a dual-theme UI: a responsive user workspace (light, dark, and system modes) and a specialized dark operations console for administrators. High-resolution captures of the administrative and monitoring modules can be found in [`docs/screenshots/m3/`](docs/screenshots/m3/):
+
+| Module | Screenshot | Description |
+|---|---|---|
+| **Notification Center** | [`01-notification-bell.png`](docs/screenshots/m3/01-notification-bell.png) | Real-time in-app notification dropdown displaying sharing and download alerts. |
+| **Notifications Page** | [`02-notifications-page.png`](docs/screenshots/m3/02-notifications-page.png) | Filterable notification history with mark-as-read and dismiss actions. |
+| **Notification Preferences** | [`03-notification-preferences.png`](docs/screenshots/m3/03-notification-preferences.png) | Granular email and in-app alert toggles per event category. |
+| **User Activity Monitoring** | [`04-admin-user-activity-monitoring.png`](docs/screenshots/m3/04-admin-user-activity-monitoring.png) | Live SSE feed of platform actions across all users and visitors. |
+| **Audit Logs** | [`05-admin-audit-logs.png`](docs/screenshots/m3/05-admin-audit-logs.png) | Tamper-evident, hash-chained audit log explorer with CSV export. |
+| **Security Dashboard** | [`06-admin-security-monitoring.png`](docs/screenshots/m3/06-admin-security-monitoring.png) | Overview of login trends, lockouts, geographic sign-ins, and threat levels. |
+| **Suspicious Activity Alerts** | [`07-admin-suspicious-activity-alerts.png`](docs/screenshots/m3/07-admin-suspicious-activity-alerts.png) | Automated detection alerts with severity ranking and sliding window metrics. |
+| **Alert Investigation** | [`08-admin-alert-review.png`](docs/screenshots/m3/08-admin-alert-review.png) | Alert review modal showing the ±30 minute forensic audit window and resolution notes. |
+| **Upload Reports** | [`09-admin-report-uploads.png`](docs/screenshots/m3/09-admin-report-uploads.png) | Ingestion velocity, MIME distribution, and storage volume trends. |
+| **Security Incident Reports** | [`10-admin-report-security.png`](docs/screenshots/m3/10-admin-report-security.png) | Comprehensive report detailing blocked requests, policy violations, and lockouts. |
+| **Storage Analytics** | [`11-admin-storage-analytics.png`](docs/screenshots/m3/11-admin-storage-analytics.png) | Per-user storage distribution pie charts and quota utilization metrics. |
+| **Notification Management** | [`12-admin-notification-management.png`](docs/screenshots/m3/12-admin-notification-management.png) | Administrative broadcast panel and delivery throughput statistics. |
 
 ## Project Structure
 
@@ -369,7 +427,15 @@ Interactive documentation is available at `/docs` while the backend is running.
 - [x] **Milestone 1:** design, Docker setup, authentication, RBAC, MFA, secure upload, file dashboard, CI
 - [x] **Milestone 2:** AES-256-GCM envelope encryption, S3-compatible storage, secure links and direct sharing, key rotation, user analytics, admin security dashboard, HTTPS
 - [x] **Milestone 3:** activity monitoring, tamper-evident audit logs, real-time + email notifications, security alerts, reports, storage analytics, rule-based suspicious-activity detection, unified admin dashboard
-- [ ] **Milestone 4:** security testing, cloud deployment, documentation, demo
+- [x] **Milestone 4:** security testing, cloud deployment, final documentation, demo
+
+## Known Limitations
+
+- **Browser File Previews:** In-browser rendering is deliberately limited to native web-renderable formats (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.txt`, `.csv`). Office formats (`.docx`, `.xlsx`, `.pptx`) are download-only to avoid executing untrusted server-side conversion pipelines (e.g., LibreOffice headless vulnerabilities).
+- **Single-File Upload Size:** Uploads are capped at 25 MB per file. The streaming pipeline verifies size in 1 MiB chunks and aborts immediately if this limit is exceeded, preventing memory exhaustion and denial of service.
+- **Public Share Link Lifespan:** Public share links have a maximum lifespan of 30 days to prevent orphaned or stale links on the internet. Direct user-to-user shares can be configured with indefinite access if required.
+- **Zero-Knowledge Vault Recovery:** Because files in the personal Secure Vault are encrypted using keys derived client-side from the vault password via `scrypt`, forgotten vault passwords cannot be recovered or reset by administrators. Resetting a vault erases its contents by design.
+- **Cloud Storage Adapters:** Built-in storage adapters support AWS S3 (and S3-compatible APIs such as MinIO and RustFS) and Azure Blob Storage. Google Cloud Storage (GCS) can be used via its S3-interoperability API.
 
 ## License
 

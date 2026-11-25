@@ -149,15 +149,21 @@ Browser ──HTTPS──> Caddy ──> React + Vite (UI)
 Each database is used for what it is good at: PostgreSQL for consistent relational data, MongoDB for flexible, high-volume documents, Redis for fast data that expires on its own. The backend is layered – **routes → services → repositories** – so HTTP handling, business rules and data access stay separate.
 
 ### Comprehensive Documentation
-- **Architecture & Design:** [docs/architecture.md](docs/architecture.md)
-- **Database Schema:** [docs/database.md](docs/database.md)
-- **Key Management & Envelope Encryption:** [docs/key-management.md](docs/key-management.md)
-- **Requirements Matrix:** [docs/requirements.md](docs/requirements.md)
-- **Wireframes:** [docs/wireframes.html](docs/wireframes.html)
-- **End-User Guide:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
-- **Administrator Guide:** [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)
-- **Security Test Report:** [docs/SECURITY_TEST_REPORT.md](docs/SECURITY_TEST_REPORT.md)
-- **Cloud Deployment Guide:** [DEPLOYMENT.md](DEPLOYMENT.md)
+| Document | What it covers |
+|---|---|
+| [Documentation index](docs/README.md) | Full index of all project documentation |
+| [End-User Guide](docs/USER_GUIDE.md) · [Admin Guide](docs/ADMIN_GUIDE.md) | Step-by-step usage for regular users and administrators |
+| [Features](docs/features.md) | Complete feature list grouped by area |
+| [Project Brief Coverage](docs/brief-coverage.md) | Project brief items mapped to implementation and tests |
+| [Setup & Configuration](docs/setup.md) | Local Docker setup, HTTPS, storage providers, environment variables, tests |
+| [Cloud Deployment Guide](DEPLOYMENT.md) | Production deployment on AWS EC2 with HTTPS and backups |
+| [Security Test Report](docs/SECURITY_TEST_REPORT.md) · [Test Results](docs/test-results/) | Milestone 4 SAST, dependency audits, and manual defensive checks |
+| [Live Security Testing](docs/security-testing.md) · [Performance](docs/performance.md) | Live deployment OWASP Top 10 and performance benchmark templates (`TODO: fill from my own run`) |
+| [API Reference](docs/api.md) | All API endpoints by module with required permissions |
+| [Architecture](docs/architecture.md) · [Database](docs/database.md) · [Key Management](docs/key-management.md) | System design, schema, and AES-256-GCM envelope encryption |
+| [Requirements](docs/requirements.md) · [Wireframes](docs/wireframes.html) | Roles, permission matrix, user stories, UI plan |
+| [Demo Script](docs/DEMO_SCRIPT.md) | 7-minute walkthrough and seed data script |
+| [Screenshots](docs/screenshots/m3/) · [Reference Screenshots](docs/screenshots/reference/) | Milestone 3 screenshots and upstream reference placeholders |
 
 **Encryption workflow (implemented in Milestone 2)**
 
@@ -443,7 +449,7 @@ Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**S Vimaladharsan**: [GitHub](https://github.com/Vimaladharsan)
+**Mythri Raj Banda**
 
 ## Acknowledgements
 

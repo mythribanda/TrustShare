@@ -228,3 +228,7 @@ node_modules/
 
 # --- Uploaded files (never commit user data) ---
 backend/storage/
+
+# Workspaces
+*.code-workspace
+.vscode/

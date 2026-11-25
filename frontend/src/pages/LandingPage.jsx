@@ -18,8 +18,7 @@ import { useAuth } from '../auth/useAuth';
 import ProductPreview from '../components/landing/ProductPreview';
 import Logo from '../components/Logo';
 
-const GITHUB_URL =
-  'https://github.com/mythribanda/TrustShare';
+const GITHUB_URL = 'https://github.com/mythribanda/TrustShare';
 
 // Core security architectural specs
 const FACTS = [
@@ -120,7 +119,9 @@ export default function LandingPage() {
               </span>
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
-              TrustShare delivers enterprise-grade file security and seamless collaboration. Every asset is validated at the binary level, encrypted with unique AES-256-GCM keys, and tracked by an immutable audit trail.
+              TrustShare delivers enterprise-grade file security and seamless collaboration. Every
+              asset is validated at the binary level, encrypted with unique AES-256-GCM keys, and
+              tracked by an immutable audit trail.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
@@ -204,7 +205,10 @@ export default function LandingPage() {
           />
           <ol className="mt-14 grid gap-8 md:grid-cols-3">
             {STEPS.map(({ icon: Icon, title, text }, index) => (
-              <li key={title} className="relative rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs">
+              <li
+                key={title}
+                className="relative rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs"
+              >
                 <span className="absolute top-6 right-6 text-4xl font-extrabold text-slate-100">
                   0{index + 1}
                 </span>
@@ -232,8 +236,10 @@ export default function LandingPage() {
               <h2 className="mt-6 text-3xl font-extrabold tracking-tight sm:text-4xl">
                 Cryptographic security at the core. Not an afterthought.
               </h2>
-              <p className="mt-4 text-slate-300 leading-relaxed">
-                TrustShare validates identities and fine-grained permissions against the server on every request. Client-side controls are only the surface — every boundary is verified.
+              <p className="mt-4 leading-relaxed text-slate-300">
+                TrustShare validates identities and fine-grained permissions against the server on
+                every request. Client-side controls are only the surface — every boundary is
+                verified.
               </p>
             </div>
             <ul className="grid gap-3.5 sm:grid-cols-2">
@@ -256,7 +262,9 @@ export default function LandingPage() {
         <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
           Ready to protect your sensitive files?
         </h2>
-        <p className="mt-3 text-lg text-slate-600">Create a secure workspace and safeguard your collaboration today.</p>
+        <p className="mt-3 text-lg text-slate-600">
+          Create a secure workspace and safeguard your collaboration today.
+        </p>
         <Link
           to={loggedIn ? '/dashboard' : '/register'}
           className="mt-8 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-teal-600/30 transition hover:bg-teal-700"
@@ -279,13 +287,13 @@ function Header({ loggedIn }) {
           <Logo />
         </Link>
         <nav className="hidden gap-6 text-sm font-medium text-slate-600 md:flex">
-          <a href="#features" className="hover:text-teal-700 transition">
+          <a href="#features" className="transition hover:text-teal-700">
             Features
           </a>
-          <a href="#how-it-works" className="hover:text-teal-700 transition">
+          <a href="#how-it-works" className="transition hover:text-teal-700">
             Workflow
           </a>
-          <a href="#security" className="hover:text-teal-700 transition">
+          <a href="#security" className="transition hover:text-teal-700">
             Security Architecture
           </a>
         </nav>
@@ -293,7 +301,7 @@ function Header({ loggedIn }) {
           {loggedIn ? (
             <Link
               to="/files"
-              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 transition"
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
             >
               Open Workspace
             </Link>
@@ -301,13 +309,13 @@ function Header({ loggedIn }) {
             <>
               <Link
                 to="/login"
-                className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
               >
                 Sign In
               </Link>
               <Link
                 to="/register"
-                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 transition"
+                className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
               >
                 Get Started
               </Link>
@@ -326,7 +334,7 @@ function SectionTitle({ eyebrow, title, text }) {
       <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
         {title}
       </h2>
-      <p className="mt-4 text-slate-600 leading-relaxed">{text}</p>
+      <p className="mt-4 leading-relaxed text-slate-600">{text}</p>
     </div>
   );
 }
@@ -338,10 +346,15 @@ function Footer() {
         <Logo />
         <p>© 2026 TrustShare · Encrypted File Sharing & Collaboration</p>
         <div className="flex gap-5 font-medium">
-          <Link to="/status" className="hover:text-teal-700 transition">
+          <Link to="/status" className="transition hover:text-teal-700">
             System Status
           </Link>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="hover:text-teal-700 transition">
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="transition hover:text-teal-700"
+          >
             GitHub
           </a>
         </div>

@@ -3,6 +3,7 @@ name: Deploy to EC2 Production
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: production-deploy
@@ -12,6 +13,7 @@ jobs:
   deploy:
     name: Deploy to AWS EC2
     runs-on: ubuntu-latest
+    if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
     steps:
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1.2.0

@@ -8,9 +8,21 @@ import Logo from './Logo';
 // Platform security highlights
 const FEATURES = [
   { icon: LockKeyhole, title: 'Envelope Encryption', text: 'Unique AES-256-GCM key per file' },
-  { icon: FileCheck2, title: 'Binary Inspection', text: 'Deep content check rejects disguised files' },
-  { icon: UsersRound, title: 'Granular Governance', text: 'Strict RBAC permission checks on every route' },
-  { icon: KeyRound, title: 'Two-Step Security', text: 'TOTP authentication with emergency recovery' },
+  {
+    icon: FileCheck2,
+    title: 'Binary Inspection',
+    text: 'Deep content check rejects disguised files',
+  },
+  {
+    icon: UsersRound,
+    title: 'Granular Governance',
+    text: 'Strict RBAC permission checks on every route',
+  },
+  {
+    icon: KeyRound,
+    title: 'Two-Step Security',
+    text: 'TOTP authentication with emergency recovery',
+  },
 ];
 
 /**
@@ -63,8 +75,9 @@ function Showcase() {
             Under your control.
           </span>
         </h2>
-        <p className="mt-4 max-w-md text-slate-300 leading-relaxed">
-          Zero-trust file management backed by envelope encryption, byte-level payload verification, and immutable audit logs.
+        <p className="mt-4 max-w-md leading-relaxed text-slate-300">
+          Zero-trust file management backed by envelope encryption, byte-level payload verification,
+          and immutable audit logs.
         </p>
         <FilesPreview />
       </div>

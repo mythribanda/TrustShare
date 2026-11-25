@@ -4,8 +4,18 @@ import { fileIcon } from '../../utils/format';
 
 const ROWS = [
   { name: 'Security_Audit_Report.pdf', size: '2.8 MB', date: 'Today', category: 'document' },
-  { name: 'Financial_Projections_2026.xlsx', size: '940 KB', date: 'Today', category: 'spreadsheet' },
-  { name: 'Architecture_Presentation.pptx', size: '6.2 MB', date: 'Yesterday', category: 'presentation' },
+  {
+    name: 'Financial_Projections_2026.xlsx',
+    size: '940 KB',
+    date: 'Today',
+    category: 'spreadsheet',
+  },
+  {
+    name: 'Architecture_Presentation.pptx',
+    size: '6.2 MB',
+    date: 'Yesterday',
+    category: 'presentation',
+  },
   { name: 'Encryption_Key_Diagram.png', size: '1.9 MB', date: '14 Nov', category: 'image' },
 ];
 

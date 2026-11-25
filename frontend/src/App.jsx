@@ -107,66 +107,66 @@ export default function App() {
     <>
       <PageTitleUpdater />
       <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
-      <Route path="/auth/google" element={<GoogleCallbackPage />} />
-      <Route path="/status" element={<StatusPage />} />
-      {/* Share links work without an account. */}
-      <Route path="/s/:token" element={<PublicSharePage />} />
-      <Route
-        element={
-          <ProtectedRoute>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/files" element={<FilesPage />} />
-        <Route path="/folders/:folderId" element={<FilesPage />} />
-        <Route path="/search" element={<FilesPage mode="search" />} />
-        <Route path="/shared-with-me" element={<SharedWithMePage />} />
-        <Route path="/shared-by-me" element={<SharedByMePage />} />
-        <Route path="/recent" element={<RecentPage />} />
-        <Route path="/favorites" element={<FavoritesPage />} />
-        <Route path="/trash" element={<TrashPage />} />
-        <Route path="/vault" element={<VaultPage />} />
-        <Route path="/storage" element={<StoragePage />} />
-        <Route path="/analytics" element={lazyPage(<AnalyticsPage />)} />
-        <Route path="/activity" element={<ActivityPage />} />
-        <Route path="/security" element={<SecurityPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
-      </Route>
-      {/* Admin panel – its own dark frame. Every API call behind it checks permissions. */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <AdminLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/admin" element={lazyPage(<AdminDashboardPage />)} />
-        <Route path="/admin/users" element={lazyPage(<AdminUsersPage />)} />
-        <Route path="/admin/storage" element={lazyPage(<AdminStoragePage />)} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/auth/google" element={<GoogleCallbackPage />} />
+        <Route path="/status" element={<StatusPage />} />
+        {/* Share links work without an account. */}
+        <Route path="/s/:token" element={<PublicSharePage />} />
         <Route
-          path="/admin/sharing"
-          element={<Navigate to="/admin/reports?tab=sharing" replace />}
-        />
-        <Route path="/admin/security" element={lazyPage(<SecurityDashboardPage />)} />
-        <Route path="/admin/system" element={lazyPage(<SystemPage />)} />
-        <Route path="/admin/activity" element={<Navigate to="/admin/audit" replace />} />
-        <Route path="/admin/activity-monitoring" element={lazyPage(<ActivityMonitoringPage />)} />
-        <Route path="/admin/audit" element={lazyPage(<AuditLogsPage />)} />
-        <Route path="/admin/reports" element={lazyPage(<ReportsPage />)} />
-        <Route path="/admin/notifications" element={lazyPage(<NotificationManagementPage />)} />
-        <Route path="/admin/alerts" element={lazyPage(<AlertsPage />)} />
-      </Route>
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/files" element={<FilesPage />} />
+          <Route path="/folders/:folderId" element={<FilesPage />} />
+          <Route path="/search" element={<FilesPage mode="search" />} />
+          <Route path="/shared-with-me" element={<SharedWithMePage />} />
+          <Route path="/shared-by-me" element={<SharedByMePage />} />
+          <Route path="/recent" element={<RecentPage />} />
+          <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/trash" element={<TrashPage />} />
+          <Route path="/vault" element={<VaultPage />} />
+          <Route path="/storage" element={<StoragePage />} />
+          <Route path="/analytics" element={lazyPage(<AnalyticsPage />)} />
+          <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/security" element={<SecurityPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
+        </Route>
+        {/* Admin panel – its own dark frame. Every API call behind it checks permissions. */}
+        <Route
+          element={
+            <ProtectedRoute>
+              <AdminLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/admin" element={lazyPage(<AdminDashboardPage />)} />
+          <Route path="/admin/users" element={lazyPage(<AdminUsersPage />)} />
+          <Route path="/admin/storage" element={lazyPage(<AdminStoragePage />)} />
+          <Route
+            path="/admin/sharing"
+            element={<Navigate to="/admin/reports?tab=sharing" replace />}
+          />
+          <Route path="/admin/security" element={lazyPage(<SecurityDashboardPage />)} />
+          <Route path="/admin/system" element={lazyPage(<SystemPage />)} />
+          <Route path="/admin/activity" element={<Navigate to="/admin/audit" replace />} />
+          <Route path="/admin/activity-monitoring" element={lazyPage(<ActivityMonitoringPage />)} />
+          <Route path="/admin/audit" element={lazyPage(<AuditLogsPage />)} />
+          <Route path="/admin/reports" element={lazyPage(<ReportsPage />)} />
+          <Route path="/admin/notifications" element={lazyPage(<NotificationManagementPage />)} />
+          <Route path="/admin/alerts" element={lazyPage(<AlertsPage />)} />
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </>
   );
 }

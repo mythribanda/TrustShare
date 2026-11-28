@@ -1,6 +1,6 @@
 """Secure vault: a private, password-protected place for a user's most sensitive files.
 
-Rules (decided with Vimal, 27 Oct):
+Vault security requirements:
   - Extra encryption: every vault file's key is sealed with a key derived from the vault password
     (app/crypto/vault_crypto.py) inside the usual master-key envelope. Without the vault password
     nobody – not even someone with the database and the master keys – can open the files or read

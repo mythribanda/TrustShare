@@ -2,7 +2,7 @@
 
 A secure file-sharing and document management platform – a private alternative to Google Drive. Every file is validated, **encrypted server-side with its own AES-256-GCM key** (envelope encryption with rotatable master keys) and stored in private cloud object storage (S3 API or Azure Blob Storage). Users organise files in folders and share them through **permission-controlled, expiring, revocable links** or directly with other users – with analytics for users and a security dashboard for admins. Every action is recorded in a **tamper-evident audit log**, suspicious behaviour raises **alerts**, and users and admins get **real-time notifications**.
 
-![CI](https://github.com/Vimaladharsan/TrustShare-Encrypted-File-Sharing-Collaboration-Platform/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/mythribanda/TrustShare/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
@@ -254,8 +254,8 @@ TrustShare/
 ### Run with Docker
 
 ```bash
-git clone https://github.com/Vimaladharsan/TrustShare-Encrypted-File-Sharing-Collaboration-Platform.git
-cd TrustShare-Encrypted-File-Sharing-Collaboration-Platform
+git clone https://github.com/mythribanda/TrustShare.git
+cd TrustShare
 cp .env.example .env    # then replace every "change-me" value
 docker compose up -d --build
 ```
@@ -450,8 +450,3 @@ Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 ## Author
 
 **Mythri Raj Banda**
-
-## Acknowledgements
-
-This project is built upon the open-source foundation developed by [S Vimaladharsan](https://github.com/Vimaladharsan) in [TrustShare-Encrypted-File-Sharing-Collaboration-Platform](https://github.com/Vimaladharsan/TrustShare-Encrypted-File-Sharing-Collaboration-Platform), licensed under the MIT License.
-

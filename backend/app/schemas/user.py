@@ -66,7 +66,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    full_name: str = Field(min_length=2, max_length=100, examples=["Vimal S"])
+    full_name: str = Field(min_length=2, max_length=100, examples=["Alex Morgan"])
 
     @field_validator("full_name")
     @classmethod

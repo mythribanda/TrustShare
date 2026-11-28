@@ -24,8 +24,8 @@ def password_problem(password: str, email: str) -> str | None:
 
 
 class RegisterRequest(BaseModel):
-    full_name: str = Field(min_length=2, max_length=100, examples=["Vimal S"])
-    email: EmailStr = Field(examples=["vimal@example.com"])
+    full_name: str = Field(min_length=2, max_length=100, examples=["Alex Morgan"])
+    email: EmailStr = Field(examples=["alex@example.com"])
     # bcrypt only uses the first 72 bytes, so cap the length well below that.
     password: str = Field(min_length=10, max_length=64, examples=["Str0ng!Passw0rd"])
 

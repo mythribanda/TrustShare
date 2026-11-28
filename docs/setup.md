@@ -11,8 +11,8 @@ For the production server see the [deployment guide](../DEPLOYMENT.md).
 ## Run with Docker
 
 ```bash
-git clone https://github.com/Vimaladharsan/TrustShare-Encrypted-File-Sharing-Collaboration-Platform.git
-cd TrustShare-Encrypted-File-Sharing-Collaboration-Platform
+git clone https://github.com/mythribanda/TrustShare.git
+cd TrustShare
 cp .env.example .env    # then replace every "change-me" value
 docker compose up -d --build
 ```
